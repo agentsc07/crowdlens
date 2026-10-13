@@ -10,6 +10,6 @@ class SigLIPZeroShot:
         pos = embed.embed_text(f"a person {attribute}")
         neg = embed.embed_text(f"a person not {attribute}")
         model = embed._load()[0]
-        scale = float(model.logit_scale.exp()) if hasattr(model, "logit_scale") else 100.0
+        scale = float(model.logit_scale.detach().exp()) if hasattr(model, "logit_scale") else 100.0
         logits = torch.tensor([img @ pos, img @ neg]) * scale
         return float(torch.softmax(logits, 0)[0])

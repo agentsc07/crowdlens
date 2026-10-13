@@ -2,7 +2,7 @@
 name = "crowdlens"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["numpy", "opencv-python-headless", "faiss-cpu", "pillow", "streamlit"]
+dependencies = ["numpy", "opencv-python-headless", "pillow", "streamlit"]
 
 [project.optional-dependencies]
 models = ["torch", "transformers", "rfdetr", "supervision", "accelerate"]
@@ -11,3 +11,6 @@ dev = ["pytest"]
 [tool.pytest.ini_options]
 markers = ["gpu: needs a GPU and model weights"]
 addopts = "-m 'not gpu'"
+
+[tool.setuptools]
+packages = ["crowdlens", "crowdlens.verifiers", "eval"]
