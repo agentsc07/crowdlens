@@ -1,6 +1,4 @@
-import json
-from pathlib import Path
-
+"""SigLIP 2: images and text in one space. Zero-shot yes/no = softmax(image.pos, image.neg)."""
 import numpy as np
 
 from . import config
@@ -14,7 +12,7 @@ def _load():
         import torch
         from transformers import AutoModel, AutoProcessor
 
-        dev = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+        dev = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
         _model = (AutoModel.from_pretrained(config.EMBED_MODEL).to(dev).eval(),
                   AutoProcessor.from_pretrained(config.EMBED_MODEL), dev)
     return _model
@@ -26,62 +24,32 @@ def _feat(f):
 
 
 def _norm(x):
-    x = x / np.linalg.norm(x, axis=-1, keepdims=True).clip(1e-9)
-    return x.astype("float32")
+    return (x / np.linalg.norm(x, axis=-1, keepdims=True).clip(1e-9)).astype("float32")
 
 
-def embed_images(paths, batch=32):
+def embed_images(imgs, batch=64):
+    """imgs: list of PIL RGB images -> (n, d) unit vectors."""
     import torch
-    from PIL import Image
 
     model, proc, dev = _load()
     out = []
-    for i in range(0, len(paths), batch):
-        imgs = [Image.open(p).convert("RGB") for p in paths[i:i + batch]]
+    for i in range(0, len(imgs), batch):
         with torch.no_grad():
-            f = model.get_image_features(**proc(images=imgs, return_tensors="pt").to(dev))
-        out.append(_feat(f).cpu().numpy())
-    return _norm(np.concatenate(out)) if out else np.zeros((0, 1), "float32")
+            f = model.get_image_features(**proc(images=imgs[i:i + batch], return_tensors="pt").to(dev))
+        out.append(_feat(f).float().cpu().numpy())
+    return _norm(np.concatenate(out)) if out else np.zeros((0, 768), "float32")
 
 
-def embed_text(q):
+def embed_text(texts):
     import torch
 
     model, proc, dev = _load()
     with torch.no_grad():
-        t = proc(text=[q], padding="max_length", max_length=64, return_tensors="pt").to(dev)
+        t = proc(text=list(texts), padding="max_length", max_length=64, return_tensors="pt").to(dev)
         f = model.get_text_features(**t)
-    return _norm(_feat(f).cpu().numpy())[0]
+    return _norm(_feat(f).float().cpu().numpy())
 
 
-def save_index(out_dir, vecs, ids):
-    # Plain NumPy store: thousands of crops is tiny, and faiss-cpu segfaults alongside torch on macOS.
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("index.npy", "ids.json"):
-        (out_dir / name).unlink(missing_ok=True)
-    np.save(out_dir / "index.npy", np.ascontiguousarray(vecs, dtype="float32"))
-    (out_dir / "ids.json").write_text(json.dumps(list(map(int, ids))))
-
-
-def build_index(people, out_dir, root=None):
-    """One vector per person: mean of their crop vectors, renormalised."""
-    root = Path(root or out_dir)
-    vecs, ids = [], []
-    for p in people:
-        if not p.crops:
-            continue
-        v = embed_images([str(root / c.path) for c in p.crops]).mean(axis=0, keepdims=True)
-        vecs.append(_norm(v)[0])
-        ids.append(p.track_id)
-    save_index(out_dir, np.stack(vecs) if vecs else np.zeros((0, 1), "float32"), ids)
-
-
-def shortlist(out_dir, q_vec, k):
-    out_dir = Path(out_dir)
-    ids = json.loads((out_dir / "ids.json").read_text())
-    if not ids:
-        return []
-    scores = np.load(out_dir / "index.npy") @ np.asarray(q_vec, "float32")
-    order = np.argsort(-scores)[: min(k, len(ids))]
-    return [(ids[r], float(scores[r])) for r in order]
+def logit_scale():
+    m = _load()[0]
+    return float(m.logit_scale.detach().exp()) if hasattr(m, "logit_scale") else 100.0
