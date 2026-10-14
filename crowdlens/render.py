@@ -1,4 +1,4 @@
-"""Annotated playback: every detected person boxed green (yes) / red (no) with P(yes); HUD with the question."""
+"""Annotated playback: every detected person boxed green (yes) / red (no) / gray (too small to judge) with P(yes); HUD with the question."""
 import subprocess
 
 import cv2
@@ -6,14 +6,16 @@ import numpy as np
 
 from . import config
 
-GREEN, RED = (60, 200, 60), (50, 50, 230)
+GREEN, RED, GRAY = (60, 200, 60), (50, 50, 230), (140, 140, 140)
 
 
 def draw(frame, boxes, tracks, p, threshold, hud):
     for (x1, y1, x2, y2), t, pi in zip(boxes, tracks, p):
-        c = GREEN if pi >= threshold else RED
+        unclear = np.isnan(pi)
+        yes = (not unclear) and pi >= threshold
+        c = GRAY if unclear else GREEN if yes else RED
         cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), c, 2)
-        label = f"{'YES' if pi >= threshold else 'no'} {pi:.2f}"
+        label = "?" if unclear else f"{'YES' if yes else 'no'} {pi:.2f}"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
         cv2.rectangle(frame, (int(x1), int(y1) - th - 6), (int(x1) + tw + 4, int(y1)), c, -1)
         cv2.putText(frame, label, (int(x1) + 2, int(y1) - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)

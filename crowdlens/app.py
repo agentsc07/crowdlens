@@ -10,11 +10,12 @@ import streamlit as st
 from crowdlens import config
 from crowdlens.index import index_video, load
 from crowdlens.render import draw, render_video
-from crowdlens.score import ask, frame_counts, unique_yes
+from crowdlens.score import (detection_probs, frame_counts, is_yes, parse_attribute, people_summary,
+                             track_scores)
 
 st.set_page_config(page_title="CrowdLens", layout="wide")
 st.title("CrowdLens")
-st.caption("Per-frame yes/no for every person, from a text question. Attributes only, never identities. Runs locally.")
+st.caption("A small open VLM answers yes/no for every tracked person. Attributes only, never identities. Runs locally.")
 
 with st.sidebar:
     stride = st.select_slider("Detect every Nth frame (higher = faster)", [1, 2, 3, 4, 6, 8], config.DEFAULT_STRIDE)
@@ -39,30 +40,36 @@ if not vid:
 d = config.DATA_DIR / vid
 dets, meta = load(d)
 
-q = st.text_input("Ask a question", placeholder="wearing a red shirt")
+q = st.text_input("Ask a question", placeholder="wearing a hat")
 if q and st.button("Ask"):
     try:
-        attr, p = ask(dets, q)
+        attr = parse_attribute(q)
     except ValueError as e:
         st.error(str(e))
         st.stop()
-    bar = st.progress(0.0, "Rendering annotated video…")
+    bar = st.progress(0.0, "Asking the VLM about each person…")
+    scores = track_scores(d, dets["track"], attr, lambda f: bar.progress(f, "Asking the VLM about each person…"))
+    p = detection_probs(dets["track"], scores)
+    bar.progress(0.0, "Rendering annotated video…")
     out = render_video(st.session_state["video"], dets, meta, p, attr, d / "annotated.mp4", threshold,
                        lambda f: bar.progress(f, "Rendering annotated video…"))
     bar.empty()
-    st.session_state["result"] = dict(attr=attr, p=p, out=str(out))
+    st.session_state["result"] = dict(attr=attr, scores=scores, p=p, out=str(out), thr=threshold)
 
 res = st.session_state.get("result")
 if not res:
     st.stop()
 
-p = res["p"]
-yes_ids, n_people = unique_yes(dets["track"], p, threshold)
+p, scores = res["p"], res["scores"]
+yes_n, no_n, unclear_n = people_summary(scores, threshold)
 yes, tot = frame_counts(dets["frame"], p, meta["frames"], meta["stride"], threshold)
-c1, c2, c3 = st.columns(3)
-c1.metric(f"People matching “{res['attr']}”", f"{len(yes_ids)} of {n_people}")
-c2.metric("Peak in a single frame", int(yes.max()) if len(yes) else 0)
-c3.metric("Detections scored", len(p))
+c1, c2, c3, c4 = st.columns(4)
+c1.metric(f"Yes: “{res['attr']}”", yes_n)
+c2.metric("No", no_n)
+c3.metric("Too small to judge", unclear_n)
+c4.metric("Peak yes in one frame", int(yes.max()) if len(yes) else 0)
+if res["thr"] != threshold:
+    st.caption("Threshold changed since the video was rendered: counts are live, the video is not. Ask again to re-render.")
 
 left, right = st.columns([3, 2])
 with left:
@@ -72,17 +79,28 @@ with right:
     st.subheader("Yes count per frame")
     st.line_chart({"yes": yes, "all people": tot})
 
+st.subheader("Every person, with the crop the VLM saw")
+order = sorted(scores, key=lambda t: -np.nan_to_num(scores[t], nan=-1))
+show = st.radio("Show", ["Yes", "No", "Too small", "All"], horizontal=True)
+cols = st.columns(8)
+n = 0
+for t in order:
+    v = scores[t]
+    label = "Too small" if np.isnan(v) else "Yes" if v >= threshold else "No"
+    if show not in ("All", label):
+        continue
+    f = d / "crops" / f"{t}.jpg"
+    if f.exists():
+        cols[n % 8].image(str(f), caption=f"{label}" + ("" if np.isnan(v) else f" {v:.2f}"))
+        n += 1
+
 st.subheader("Inspect a frame")
-f = st.slider("Frame", 0, max(meta["frames"] - 1, 0), 0)
+fr = st.slider("Frame", 0, max(meta["frames"] - 1, 0), 0)
 cap = cv2.VideoCapture(st.session_state["video"])
-cap.set(cv2.CAP_PROP_POS_FRAMES, f)
+cap.set(cv2.CAP_PROP_POS_FRAMES, fr)
 ok, img = cap.read()
 cap.release()
 if ok:
-    src = f - f % meta["stride"]
-    m = dets["frame"] == src
-    img = draw(img, dets["box"][m], dets["track"][m], p[m], threshold, f"frame {f}: yes {yes[f]} / {tot[f]}")
-    a, b = st.columns([3, 2])
-    a.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-    b.dataframe({"person (temp id)": dets["track"][m].tolist(), "P(yes)": p[m].round(3).tolist(),
-                 "answer": ["yes" if x >= threshold else "no" for x in p[m]]}, hide_index=True)
+    m = dets["frame"] == fr - fr % meta["stride"]
+    img = draw(img, dets["box"][m], dets["track"][m], p[m], threshold, f"frame {fr}: yes {yes[fr]} / {tot[fr]}")
+    st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))

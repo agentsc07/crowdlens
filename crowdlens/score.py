@@ -1,12 +1,15 @@
-"""Pass 2 (per question, milliseconds): yes/no for every person in every frame. Pure NumPy."""
+"""Per-question scoring. The VLM answers once per tracked person (on their best crop); every box of that
+person in every frame shares the answer. Too-small crops are NaN = "unclear"."""
+import json
 import re
+from pathlib import Path
 
+import cv2
 import numpy as np
 
 from . import config
-from .embed import embed_text, logit_scale
 
-_LEAD = re.compile(r"^\s*(how many|show me|count|find)\b\s*(people|persons|persons|everyone|of them|they)?\s*(are|is|have|has)?\s*", re.I)
+_LEAD = re.compile(r"^\s*(how many|show me|count|find)\b\s*(people|persons|everyone|of them|they)?\s*(are|is|have|has)?\s*", re.I)
 
 
 def parse_attribute(question):
@@ -18,39 +21,54 @@ def parse_attribute(question):
     return q
 
 
-def prompts(attribute):
-    return f"a photo of a person {attribute}", f"a photo of a person not {attribute}"
+def track_scores(out_dir, tracks, attribute, progress=None):
+    """-> {track_id: P(yes) or NaN}. Cached per attribute in answers.json."""
+    out_dir = Path(out_dir)
+    cache_f = out_dir / "answers.json"
+    cache = json.loads(cache_f.read_text()) if cache_f.exists() else {}
+    if attribute in cache:
+        return {int(k): (np.nan if v is None else v) for k, v in cache[attribute].items()}
+    ids = sorted(set(int(t) for t in tracks))
+    ok, small = [], []
+    for t in ids:
+        f = out_dir / "crops" / f"{t}.jpg"
+        img = cv2.imread(str(f)) if f.exists() else None
+        (ok if img is not None and img.shape[0] >= config.MIN_CROP_H else small).append(t)
+    scores = {t: float("nan") for t in small}
+    if ok:
+        from . import vlm
+        ps = vlm.p_yes([str(out_dir / "crops" / f"{t}.jpg") for t in ok], attribute, progress=progress)
+        scores.update(zip(ok, ps))
+    cache[attribute] = {str(k): (None if np.isnan(v) else v) for k, v in scores.items()}
+    cache_f.write_text(json.dumps(cache))
+    return scores
 
 
-def yes_probs(embs, pos, neg, scale=100.0):
-    """softmax over the two prompts; embs (n,d), pos/neg (d,) -> (n,) P(yes)."""
-    if len(embs) == 0:
-        return np.zeros(0, "float32")
-    a, b = scale * embs @ pos, scale * embs @ neg
-    return (1 / (1 + np.exp(b - a))).astype("float32")
+def detection_probs(tracks, scores):
+    return np.array([scores.get(int(t), np.nan) for t in tracks], dtype="float64")
 
 
-def ask(dets, question):
-    attr = parse_attribute(question)
-    pos, neg = embed_text(prompts(attr))
-    return attr, yes_probs(dets["emb"], pos, neg, logit_scale())
+def is_yes(p, threshold=config.THRESHOLD):
+    return np.nan_to_num(p, nan=0.0) >= threshold
 
 
 def frame_counts(frames, p, n_frames, stride, threshold=config.THRESHOLD):
     """Per-frame (yes, total). Frames the detector skipped repeat the previous processed frame."""
     yes = np.zeros(n_frames, int)
     tot = np.zeros(n_frames, int)
+    y = is_yes(p, threshold)
     for f in np.unique(frames):
         m = frames == f
-        yes[f] = int((p[m] >= threshold).sum())
-        tot[f] = int(m.sum())
+        yes[f], tot[f] = int(y[m].sum()), int(m.sum())
     for f in range(n_frames):
         if f % stride != 0:
             yes[f], tot[f] = yes[f - f % stride], tot[f - f % stride]
     return yes, tot
 
 
-def unique_yes(tracks, p, threshold=config.THRESHOLD):
-    """People (tracks) whose mean P(yes) over the video is above threshold."""
-    ids = np.unique(tracks)
-    return [int(t) for t in ids if p[tracks == t].mean() >= threshold], len(ids)
+def people_summary(scores, threshold=config.THRESHOLD):
+    """(yes, no, unclear) counts over tracked people."""
+    v = np.array(list(scores.values()), dtype="float64")
+    unclear = int(np.isnan(v).sum())
+    yes = int((np.nan_to_num(v, nan=0.0) >= threshold).sum())
+    return yes, len(v) - yes - unclear, unclear
