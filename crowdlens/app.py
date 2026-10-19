@@ -67,6 +67,8 @@ def indexed_videos():
     """[(label, vid, category, original video path)] for everything already indexed."""
     out = []
     for m in sorted(config.DATA_DIR.glob("*/meta.json")) if config.DATA_DIR.exists() else []:
+        if m.parent.name.endswith(".tmp") or not any((m.parent / "crops").glob("*.jpg")):
+            continue  # unfinished or damaged index
         vid, _, cat = m.parent.name.partition("__")
         vids = [f for f in config.DATA_DIR.glob(f"{vid}.*") if f.suffix.lower() in (".mp4", ".mov", ".avi")]
         if vids:
@@ -86,6 +88,35 @@ def tiles_for(scores, threshold, d, numbers=True):
                 label += f" {v:.2f}"
             out.append((kind, ui.tile(src, kind, label)))
     return out
+
+
+@st.cache_resource
+def _jobs():
+    return {}
+
+
+@st.fragment(run_every=0.7)
+def show_index_job(job):
+    """Live view of the background indexing thread. The job survives page reruns, so a click or refresh
+    while indexing no longer destroys the index."""
+    if job["done"]:
+        ss["seen_job"] = id(job)
+        if job["error"]:
+            st.error(f"Indexing failed: {job['error']}")
+            return
+        ss.update(vid=job["vid"], category=job["cat"], video=job["video"], result=None)
+        go_to(STAGES[1])
+        return
+    phrase = THINK_INDEX[(job["n"] // 6) % len(THINK_INDEX)]
+    st.markdown(ui.live(f"{phrase}…" if job["info"] else job["msg"], job["f"], eta_text(job["t0"], job["f"])),
+                unsafe_allow_html=True)
+    pl, pr = st.columns([3, 2])
+    if job["info"]:
+        pl.image(job["info"]["img"], use_container_width=True)
+        pr.markdown(ui.stats([(f"{plural(job['cat']).capitalize()} in this frame", job["info"]["people"], "blue"),
+                              ("Different ones so far", job["info"]["tracks"], "")]), unsafe_allow_html=True)
+    else:
+        pl.markdown(ui.skeleton(380), unsafe_allow_html=True)
 
 
 def go_to(stage):
@@ -139,33 +170,36 @@ if stage == STAGES[0]:
                                label_visibility="collapsed")
             st.caption("Everything of this type is found and followed through the video; then you ask about it.")
             go_index = bool(up) and st.button("Index video", type="primary", use_container_width=True)
-    if go_index:
+    job = _jobs().get("index")
+    if go_index and not (job and not job["done"]):
         prewarm()
         name = Path(up.name)
         config.DATA_DIR.mkdir(parents=True, exist_ok=True)
         video = config.DATA_DIR / f"{name.stem}{name.suffix}"
         video.write_bytes(up.getvalue())
-        live_ph = st.empty()
-        pl, pr = st.columns([3, 2])
-        img_ph, stat_ph = pl.empty(), pr.empty()
-        img_ph.markdown(ui.skeleton(380), unsafe_allow_html=True)
-        t0, n_cb = time.time(), [0]
+        job = dict(done=False, error=None, f=0.0, msg="Starting…", info=None, t0=time.time(), cat=cat, vid=name.stem,
+                   video=str(video), n=0)
+        _jobs()["index"] = job
 
-        def on_progress(f, msg="", info=None):
-            n_cb[0] += 1
-            phrase = THINK_INDEX[(n_cb[0] // 6) % len(THINK_INDEX)]
-            live_ph.markdown(ui.live(f"{phrase}…" if info else msg, f, eta_text(t0, f)), unsafe_allow_html=True)
-            if info:
-                img_ph.image(info["img"], use_container_width=True)
-                stat_ph.markdown(ui.stats([(f"{plural(cat).capitalize()} in this frame", info["people"], "blue"),
-                                           ("Different ones so far", info["tracks"], "")]), unsafe_allow_html=True)
+        def work():
+            def cb(f, msg="", info=None):
+                job.update(f=f, msg=msg, info=info or job["info"], n=job["n"] + 1)
+            try:
+                index_video(video, config.video_dir(name.stem, cat), stride, cb, cat)
+            except Exception as e:  # shown in the UI; the previous index (if any) is untouched
+                job["error"] = repr(e)
+            job["done"] = True
 
-        index_video(video, config.video_dir(name.stem, cat), stride, on_progress, cat)
-        ss.update(vid=name.stem, category=cat, video=str(video), result=None)
-        go_to(STAGES[1])
+        threading.Thread(target=work, daemon=True).start()
+    if job and not (job["done"] and ss.get("seen_job") == id(job)):
+        show_index_job(job)
     st.stop()
 
 d = config.video_dir(vid, category)
+if not (d / "meta.json").exists() or not any((d / "crops").glob("*.jpg")):
+    st.error("This video's index is incomplete (it was probably interrupted). Index it again.")
+    ss["vid"] = None
+    st.stop()
 dets, meta = load(d)
 n_found = len(set(dets["track"].tolist()))
 prewarm()
@@ -181,13 +215,15 @@ if stage == STAGES[1]:
                         f'video</small></div>', unsafe_allow_html=True)
             with st.form("ask", border=False):
                 c1, c2 = st.columns([5, 1])
-                c1.text_input("Question", key="q", label_visibility="collapsed",
-                              placeholder="e.g. wearing a hat · went to the right · standing still")
+                typed = c1.text_input("Question", value=ss.get("last_q", ""), label_visibility="collapsed",
+                                      placeholder="e.g. wearing a hat · went to the right · standing still")
                 submitted = c2.form_submit_button("Ask", type="primary", use_container_width=True)
+            if submitted:
+                ss["last_q"] = typed
             chips = CHIPS.get(category, DEFAULT_CHIPS)
             for col, s_ in zip(st.columns(len(chips)), chips):
                 if col.button(s_, key=f"chip-{s_}", use_container_width=True):
-                    ss["q"], ss["go"] = s_, True
+                    ss["last_q"], ss["go"] = s_, True
                     st.rerun()
             st.checkbox("Look at several moments of each one (slower, better for actions like “using a phone”)",
                         key="multi_override", value=False)
@@ -200,9 +236,9 @@ Measured from how each one moves, corrected for camera shake. Instant.</p>
                     unsafe_allow_html=True)
 
     go = submitted or ss.pop("go", False)
-    if go and ss.get("q"):
+    if go and ss.get("last_q"):
         try:
-            route = parse_question(ss["q"])
+            route = parse_question(ss["last_q"])
         except ValueError as e:
             st.error(str(e))
             st.stop()

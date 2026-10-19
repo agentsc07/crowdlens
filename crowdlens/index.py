@@ -67,11 +67,12 @@ def index_video(video_path, out_dir, stride=config.DEFAULT_STRIDE, progress=None
     import supervision as sv
     from rfdetr import RFDETRNano
 
-    out_dir = Path(out_dir)
-    (out_dir / "crops").mkdir(parents=True, exist_ok=True)
-    for old in (out_dir / "crops").glob("*.jpg"):
-        old.unlink()
-    (out_dir / "answers.json").unlink(missing_ok=True)
+    # Built in a sibling .tmp folder and swapped in at the end: an interrupted run (page rerun, crash) leaves any
+    # existing index untouched instead of half-overwritten.
+    final = Path(out_dir)
+    out_dir = final.parent / (final.name + ".tmp")
+    shutil.rmtree(out_dir, ignore_errors=True)
+    (out_dir / "crops").mkdir(parents=True)
     cls = class_id(category)
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -163,6 +164,8 @@ def index_video(video_path, out_dir, stride=config.DEFAULT_STRIDE, progress=None
                 proxy=enc is not None and enc.returncode == 0,
                 cam_speed=camera_speed(np.array(cam_frames), cm, fps, pw) if len(cm) > 1 else 0.0)
     (out_dir / "meta.json").write_text(json.dumps(meta))
+    shutil.rmtree(final, ignore_errors=True)
+    out_dir.rename(final)
     if progress:
         progress(1.0, "Indexed")
     return len(best)
