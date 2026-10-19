@@ -25,13 +25,20 @@ def _load():
     return _state
 
 
-def p_yes(paths, attribute, batch=8, progress=None):
+def _small(path):
+    """Shrink the crop so the VLM sees few image tokens: this is the main latency and memory knob."""
+    img = Image.open(path).convert("RGB")
+    img.thumbnail((config.VLM_CROP_MAX, config.VLM_CROP_MAX))
+    return img
+
+
+def p_yes(paths, attribute, batch=16, progress=None):
     """paths: crop image files -> P(yes) per crop, in order."""
     model, proc, dev, yes_id, no_id = _load()
     out = []
     for s in range(0, len(paths), batch):
         msgs = [[{"role": "user", "content": [
-            {"type": "image", "image": Image.open(p).convert("RGB")},
+            {"type": "image", "image": _small(p)},
             {"type": "text", "text": f"Is this person {attribute}? Answer Yes or No."}]}]
             for p in paths[s:s + batch]]
         inp = proc.apply_chat_template(msgs, add_generation_prompt=True, tokenize=True, return_dict=True,
@@ -39,6 +46,9 @@ def p_yes(paths, attribute, batch=8, progress=None):
         with torch.no_grad():
             lg = model(**inp).logits[:, -1].float()
         out += torch.softmax(lg[:, [yes_id, no_id]], dim=1)[:, 0].cpu().tolist()
+        del inp, lg
+        if dev == "mps":
+            torch.mps.empty_cache()
         if progress:
             progress(min((s + batch) / len(paths), 1.0))
     return out
