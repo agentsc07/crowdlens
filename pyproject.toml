@@ -2,7 +2,7 @@
 name = "crowdlens"
 version = "0.2.0"
 requires-python = ">=3.11"
-dependencies = ["numpy", "opencv-python-headless", "pillow", "streamlit", "torch", "transformers", "rfdetr", "supervision"]
+dependencies = ["numpy", "opencv-python-headless", "pillow", "streamlit", "torch", "transformers", "rfdetr", "supervision==0.30.9"]
 
 [project.optional-dependencies]
 dev = ["pytest"]

@@ -1,5 +1,7 @@
 """Small open VLM as a closed yes/no classifier: read P(Yes) vs P(No) from the next-token logits.
 One forward pass per crop, no generated text."""
+import threading
+
 import numpy as np
 import torch
 from PIL import Image
@@ -7,9 +9,15 @@ from PIL import Image
 from . import config
 
 _state = None
+_lock = threading.Lock()  # the app pre-warms in a thread; a question must wait for it, not import concurrently
 
 
 def _load():
+    with _lock:
+        return _load_locked()
+
+
+def _load_locked():
     global _state
     if _state is None:
         from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
@@ -32,7 +40,12 @@ def _small(path):
     return img
 
 
-def p_yes(paths, attribute, batch=16, progress=None):
+def prewarm():
+    """Load the model ahead of the first question (called from a background thread)."""
+    _load()
+
+
+def p_yes(paths, attribute, batch=8, progress=None, on_batch=None):
     """paths: crop image files -> P(yes) per crop, in order."""
     model, proc, dev, yes_id, no_id = _load()
     out = []
@@ -45,7 +58,10 @@ def p_yes(paths, attribute, batch=16, progress=None):
                                        return_tensors="pt", padding=True).to(dev)
         with torch.no_grad():
             lg = model(**inp).logits[:, -1].float()
-        out += torch.softmax(lg[:, [yes_id, no_id]], dim=1)[:, 0].cpu().tolist()
+        got = torch.softmax(lg[:, [yes_id, no_id]], dim=1)[:, 0].cpu().tolist()
+        out += got
+        if on_batch:
+            on_batch(s, got)
         del inp, lg
         if dev == "mps":
             torch.mps.empty_cache()

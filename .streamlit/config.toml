@@ -3,3 +3,14 @@ enableXsrfProtection = false
 enableCORS = false
 maxUploadSize = 1000
 address = "localhost"
+
+[theme]
+base = "light"
+primaryColor = "#0a3cff"
+backgroundColor = "#eef2ff"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#0b1437"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"

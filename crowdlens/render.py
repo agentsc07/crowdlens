@@ -40,7 +40,10 @@ def render_video(video_path, dets, meta, p, question, out_path, threshold=config
     yes, tot = frame_counts(dets["frame"], p, meta["frames"], stride, threshold)
     cap = cv2.VideoCapture(str(video_path))
     tmp = str(out_path) + ".raw.mp4"
-    out = cv2.VideoWriter(tmp, cv2.VideoWriter_fourcc(*"mp4v"), meta["fps"], (meta["w"], meta["h"]))
+    # the annotated preview is drawn at reduced size: 4K re-encoding would dominate the wait
+    k = min(1.0, config.PREVIEW_MAX / max(meta["w"], meta["h"]))
+    size = (int(meta["w"] * k) // 2 * 2, int(meta["h"] * k) // 2 * 2)
+    out = cv2.VideoWriter(tmp, cv2.VideoWriter_fourcc(*"mp4v"), meta["fps"], size)
     last = (np.zeros((0, 4)), np.zeros(0, int), np.zeros(0))
     i = 0
     while True:
@@ -50,14 +53,16 @@ def render_video(video_path, dets, meta, p, question, out_path, threshold=config
         if i % stride == 0:
             last = per.get(i, (np.zeros((0, 4)), np.zeros(0, int), np.zeros(0)))
         hud = f'"{question}"   frame {i}   yes {yes[min(i, len(yes) - 1)]} / {tot[min(i, len(tot) - 1)]} people'
-        out.write(draw(frame, *last[:2], last[2], threshold, hud))
+        if k < 1:
+            frame = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
+        out.write(draw(frame, last[0] * k, last[1], last[2], threshold, hud))
         i += 1
         if progress and i % 10 == 0:
             progress(min(i / meta["frames"], 1.0))
     cap.release()
     out.release()
     # browsers need H.264; re-encode with ffmpeg when available, else fall back to the raw file
-    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp, "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out_path)])
+    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp, "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(out_path)])
     if r.returncode != 0:
         import shutil
         shutil.move(tmp, out_path)

@@ -21,7 +21,7 @@ def parse_attribute(question):
     return q
 
 
-def track_scores(out_dir, tracks, attribute, progress=None):
+def track_scores(out_dir, tracks, attribute, progress=None, on_result=None):
     """-> {track_id: P(yes) or NaN}. Cached per attribute in answers.json."""
     out_dir = Path(out_dir)
     cache_f = out_dir / "answers.json"
@@ -35,9 +35,19 @@ def track_scores(out_dir, tracks, attribute, progress=None):
         img = cv2.imread(str(f)) if f.exists() else None
         (ok if img is not None and img.shape[0] >= config.MIN_CROP_H else small).append(t)
     scores = {t: float("nan") for t in small}
+    if on_result:
+        for t in small:
+            on_result(t, float("nan"))
     if ok:
         from . import vlm
-        ps = vlm.p_yes([str(out_dir / "crops" / f"{t}.jpg") for t in ok], attribute, progress=progress)
+
+        def on_batch(start, got):
+            if on_result:
+                for t, v in zip(ok[start:start + len(got)], got):
+                    on_result(t, v)
+
+        ps = vlm.p_yes([str(out_dir / "crops" / f"{t}.jpg") for t in ok], attribute, progress=progress,
+                       on_batch=on_batch)
         scores.update(zip(ok, ps))
     cache[attribute] = {str(k): (None if np.isnan(v) else v) for k, v in scores.items()}
     cache_f.write_text(json.dumps(cache))
