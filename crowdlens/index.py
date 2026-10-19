@@ -19,6 +19,32 @@ def crop_score(img):
     return float(np.sqrt(h * w) * np.log1p(sharp))
 
 
+def detect_people(model, frame):
+    """RF-DETR sees a ~600px image, so distant people vanish. Also scan overlapping 640px tiles of a
+    1080px-wide copy and merge everything with NMS. Returns person boxes in `frame` coordinates."""
+    import supervision as sv
+
+    h, w = frame.shape[:2]
+    k = min(1.0, config.DETECT_WIDTH / w)
+    work = cv2.resize(frame, (int(w * k), int(h * k))) if k < 1 else frame
+    wh, ww = work.shape[:2]
+    t = config.TILE
+    views = [(work, 0, 0)]
+    for oy in range(0, max(wh - t, 0) + 1, t // 2):
+        for ox in range(0, max(ww - t, 0) + 1, t // 2):
+            views.append((work[oy:oy + t, ox:ox + t], ox, oy))
+    xyxy, conf = [], []
+    for img, ox, oy in views:
+        d = model.predict(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), threshold=config.DETECT_CONF)
+        d = d[d.class_id == PERSON]
+        xyxy.append(d.xyxy + np.array([ox, oy, ox, oy]))
+        conf.append(d.confidence)
+    det = sv.Detections(xyxy=np.concatenate(xyxy).reshape(-1, 4).astype(float), confidence=np.concatenate(conf),
+                        class_id=np.zeros(sum(len(c) for c in conf), int)).with_nms(threshold=0.5, class_agnostic=True)
+    det.xyxy = det.xyxy / k
+    return det
+
+
 def index_video(video_path, out_dir, stride=config.DEFAULT_STRIDE, progress=None):
     import supervision as sv
     from rfdetr import RFDETRNano
@@ -43,8 +69,7 @@ def index_video(video_path, out_dir, stride=config.DEFAULT_STRIDE, progress=None
         if not ok:
             break
         if i % stride == 0:
-            det = model.predict(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), threshold=config.DETECT_CONF)
-            det = det[det.class_id == PERSON]
+            det = detect_people(model, frame)
             det = tracker.update_with_detections(det)
             for b, tid in zip(det.xyxy, det.tracker_id):
                 x1, y1, x2, y2 = [int(v) for v in b]
