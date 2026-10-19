@@ -87,6 +87,16 @@ def index_video(video_path, out_dir, stride=config.DEFAULT_STRIDE, progress=None
             progress(min(i / total, 1.0), f"Detecting people… frame {i}/{total}")
     cap.release()
 
+    # flicker tracks (seen in under MIN_TRACK_DETS detections) are mostly tracker noise: drop them so the
+    # VLM isn't asked about the same person several times
+    count = {}
+    for t in tracks:
+        count[t] = count.get(t, 0) + 1
+    keep = {t for t, c in count.items() if c >= config.MIN_TRACK_DETS}
+    sel = [j for j, t in enumerate(tracks) if t in keep]
+    frames = [frames[j] for j in sel]; boxes = [boxes[j] for j in sel]; tracks = [tracks[j] for j in sel]
+    best = {t: v for t, v in best.items() if t in keep}
+
     for tid, (_, img) in best.items():
         cv2.imwrite(str(out_dir / "crops" / f"{tid}.jpg"), img)
     np.savez_compressed(out_dir / "dets.npz", frame=np.array(frames, int), track=np.array(tracks, int),
