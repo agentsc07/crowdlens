@@ -13,3 +13,15 @@ THRESHOLD = 0.5
 MIN_CROP_H = 64      # best crop shorter than this is too small to judge -> "unclear"
 VLM_CROP_MAX = 224  # longest side of a crop fed to the VLM, in pixels
 PREVIEW_MAX = 960  # longest side of the annotated preview video, in pixels
+MIN_MOTION_DETS = 4      # a track needs this many detections ...
+MIN_MOTION_SECONDS = 1.0  # ... spanning at least this long before its movement is judged
+SLOT_SPAN = 6            # multi-moment mode keeps the sharpest crop from each run of this many detections
+LOST_BUFFER = 90         # tracker keeps a lost person alive this many frames (at 30fps-equivalent)
+# COCO classes the detector can index; the first is the default
+CATEGORIES = ["person", "car", "bicycle", "motorcycle", "bus", "truck", "dog", "cat", "bird", "horse", "boat", "umbrella"]
+
+
+def video_dir(vid, category="person"):
+    """Each (video, category) is its own index; people keep the plain name."""
+    return DATA_DIR / (vid if category == "person" else f"{vid}__{category}")
+VLM_MULTI_CROP_MAX = 160  # smaller crops when several moments of one object go in one prompt

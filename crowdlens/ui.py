@@ -124,14 +124,22 @@ h2,h3{letter-spacing:-.02em;color:var(--ink)}
   .stat span{font-size:1.9rem}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+[data-testid="stVerticalBlockBorderWrapper"]{background:var(--glass);border:1px solid var(--edge) !important;border-radius:28px;
+  padding:6px 10px;box-shadow:0 24px 60px rgba(10,60,255,.12),inset 0 1px 0 rgba(255,255,255,.9);
+  -webkit-backdrop-filter:blur(22px) saturate(170%);backdrop-filter:blur(22px) saturate(170%)}
+.hint{margin:0 0 12px;color:var(--muted);font-size:.9rem;line-height:1.5}.hint b{color:var(--ink)}
+[data-testid="stButtonGroup"] button{border-radius:999px !important;font-weight:600}
+[data-testid="stButtonGroup"] button[aria-checked="true"],[data-testid="stButtonGroup"] button[data-testid*="Active"]{
+  background:#fff !important;color:var(--blue) !important;box-shadow:0 8px 22px rgba(10,60,255,.18)}
+[data-baseweb="tab-list"]{gap:6px}[data-baseweb="tab"]{border-radius:999px !important}
 </style>
 """
 
 
 def hero():
     return ('<div class="hero"><div class="logo"><i></i><i></i></div><div><h1>CrowdLens</h1>'
-            '<p>Ask a question of any crowd video.</p></div></div>'
-            '<span class="privacy">Attributes only, never identities. Runs fully on this machine.</span>')
+            '<p>Ask a question of any video.</p></div></div>'
+            '<span class="privacy">Counts attributes and movement, never identities. Runs fully on this machine.</span>')
 
 
 def stepper(active, done=()):

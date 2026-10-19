@@ -11,20 +11,26 @@ import streamlit as st
 
 from crowdlens import config, ui
 from crowdlens.index import index_video, load
+from crowdlens.motion import motion_scores
 from crowdlens.render import draw, render_video
-from crowdlens.score import (detection_probs, frame_counts, parse_attribute, people_summary, track_scores)
+from crowdlens.score import detection_probs, frame_counts, parse_question, people_summary, track_scores
 
 st.set_page_config(page_title="CrowdLens", page_icon="🔍", layout="wide")
 st.markdown(ui.CSS, unsafe_allow_html=True)
-st.markdown("""<style>
-[data-testid="stVerticalBlockBorderWrapper"]{background:var(--glass);border:1px solid var(--edge) !important;border-radius:28px;
-padding:6px 10px;box-shadow:0 24px 60px rgba(10,60,255,.12),inset 0 1px 0 rgba(255,255,255,.9);
--webkit-backdrop-filter:blur(22px) saturate(170%);backdrop-filter:blur(22px) saturate(170%)}
-</style>""", unsafe_allow_html=True)
 
-THINK_INDEX = ["Scanning every corner of the frame", "Zooming in on distant people", "Following people between frames",
-               "Picking each person's sharpest view"]
-SUGGESTIONS = ["wearing a hat", "wearing glasses", "wearing a red top", "carrying a bag", "smiling"]
+STAGES = ["1 · Video", "2 · Ask", "3 · Explore"]
+THINK_INDEX = ["Scanning every corner of the frame", "Zooming in on distant objects", "Following them between frames",
+               "Picking each one's sharpest view"]
+CHIPS = {
+    "person": ["wearing a hat", "wearing glasses", "wearing red", "carrying a bag", "walking toward the camera",
+               "standing still"],
+}
+DEFAULT_CHIPS = ["red", "white", "moving", "standing still"]
+PLURAL = {"person": "people", "bus": "buses", "bicycle": "bicycles"}
+
+
+def plural(cat):
+    return PLURAL.get(cat, cat + "s")
 
 
 @st.cache_resource
@@ -58,154 +64,200 @@ def eta_text(t0, frac):
 
 
 def indexed_videos():
+    """[(label, vid, category, original video path)] for everything already indexed."""
     out = []
     for m in sorted(config.DATA_DIR.glob("*/meta.json")) if config.DATA_DIR.exists() else []:
-        vid = m.parent.name
+        vid, _, cat = m.parent.name.partition("__")
         vids = [f for f in config.DATA_DIR.glob(f"{vid}.*") if f.suffix.lower() in (".mp4", ".mov", ".avi")]
         if vids:
-            out.append((vid, str(vids[0])))
+            out.append((f"{vid} · {plural(cat or 'person')}", vid, cat or "person", str(vids[0])))
     return out
 
 
-def tiles_for(scores, threshold, d, limit=160):
+def tiles_for(scores, threshold, d, numbers=True):
     out = []
-    order = sorted(scores, key=lambda t: -np.nan_to_num(scores[t], nan=-1))
-    for t in order:
+    for t in sorted(scores, key=lambda t: -np.nan_to_num(scores[t], nan=-1)):
         v = scores[t]
         kind = "unc" if np.isnan(v) else "yes" if v >= threshold else "no"
         src = ui.thumb(d / "crops" / f"{t}.jpg")
         if src:
-            label = "too small" if kind == "unc" else f"{'Yes' if kind == 'yes' else 'No'} {v:.2f}"
+            label = "too short" if kind == "unc" else "Yes" if kind == "yes" else "No"
+            if numbers and kind != "unc":
+                label += f" {v:.2f}"
             out.append((kind, ui.tile(src, kind, label)))
-    return out[:limit] if limit else out
+    return out
 
 
-# ---------------------------------------------------------------- header
+def go_to(stage):
+    # the nav widget is already drawn in this run, so the change is applied at the top of the next one
+    st.session_state["_goto"] = stage
+    st.rerun()
+
+
+# ---------------------------------------------------------------- state + header
+ss = st.session_state
+if "_goto" in ss:
+    ss["stage"] = ss.pop("_goto")
+ss.setdefault("stage", STAGES[0])
+vid, category = ss.get("vid"), ss.get("category", "person")
+res = ss.get("result")
+
 st.markdown(ui.hero(), unsafe_allow_html=True)
-res = st.session_state.get("result")
-vid = st.session_state.get("vid")
-steps_ph = st.empty()
-steps_ph.markdown(ui.stepper(3 if res else 2 if vid else 1, done=(1, 2) if res else (1,) if vid else ()),
-                  unsafe_allow_html=True)
-
-with st.expander("Settings", expanded=False):
-    stride = st.select_slider("Look at every Nth frame (higher = faster, slightly less precise)", [1, 2, 3, 4, 6, 8],
-                              config.DEFAULT_STRIDE)
-    threshold = st.slider("Yes threshold", 0.1, 0.9, config.THRESHOLD, 0.05)
+nav, cfg = st.columns([5, 1])
+with nav:
+    st.segmented_control("Stage", STAGES, key="stage", label_visibility="collapsed")
+with cfg:
+    with st.popover("Settings", use_container_width=True):
+        stride = st.select_slider("Look at every Nth frame (higher = faster)", [1, 2, 3, 4, 6, 8], config.DEFAULT_STRIDE)
+        threshold = st.slider("Yes threshold", 0.1, 0.9, config.THRESHOLD, 0.05)
+stage = ss.get("stage") or STAGES[0]
+if stage != STAGES[0] and not vid:
+    stage = STAGES[0]
+    st.info("Start by choosing a video.")
+if stage == STAGES[2] and not res:
+    stage = STAGES[1]
+    st.info("Ask a question first.")
 
 # ---------------------------------------------------------------- 1) video
-with st.container(border=True):
-    st.markdown('<div class="sec">1 · Choose a video</div>', unsafe_allow_html=True)
-    up = st.file_uploader("Upload a crowd video", type=["mp4", "mov", "avi"], label_visibility="collapsed")
-    existing = indexed_videos()
-    pick = None
-    if existing:
-        pick = st.selectbox("…or reopen one you've already indexed", [None] + existing,
-                            format_func=lambda x: "Select…" if x is None else x[0])
-    go_index = bool(up) and st.button("Index video", type="primary")
-    if pick and st.button("Open", key="open"):
-        st.session_state.update(vid=pick[0], video=pick[1], result=None)
-        st.rerun()
+if stage == STAGES[0]:
+    left, right = st.columns([3, 2], gap="large")
+    with left:
+        with st.container(border=True):
+            st.markdown('<div class="sec">Choose a video</div>', unsafe_allow_html=True)
+            up = st.file_uploader("Upload a video", type=["mp4", "mov", "avi"], label_visibility="collapsed")
+            existing = indexed_videos()
+            if existing:
+                pick = st.selectbox("…or reopen one you've already indexed", [None] + existing,
+                                    format_func=lambda x: "Select…" if x is None else x[0])
+                if pick and st.button("Open", key="open"):
+                    ss.update(vid=pick[1], category=pick[2], video=pick[3], result=None)
+                    go_to(STAGES[1])
+    with right:
+        with st.container(border=True):
+            st.markdown('<div class="sec">What should it look for?</div>', unsafe_allow_html=True)
+            cat = st.selectbox("Object type", config.CATEGORIES, format_func=lambda c: plural(c).capitalize(),
+                               label_visibility="collapsed")
+            st.caption("Everything of this type is found and followed through the video; then you ask about it.")
+            go_index = bool(up) and st.button("Index video", type="primary", use_container_width=True)
+    if go_index:
+        prewarm()
+        name = Path(up.name)
+        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        video = config.DATA_DIR / f"{name.stem}{name.suffix}"
+        video.write_bytes(up.getvalue())
+        live_ph = st.empty()
+        pl, pr = st.columns([3, 2])
+        img_ph, stat_ph = pl.empty(), pr.empty()
+        img_ph.markdown(ui.skeleton(380), unsafe_allow_html=True)
+        t0, n_cb = time.time(), [0]
 
-if go_index:
-    prewarm()
-    name = Path(up.name)
-    config.DATA_DIR.mkdir(exist_ok=True)
-    video = config.DATA_DIR / f"{name.stem}{name.suffix}"
-    video.write_bytes(up.getvalue())
-    steps_ph.markdown(ui.stepper(1), unsafe_allow_html=True)
-    live_ph = st.empty()
-    left, right = st.columns([3, 2])
-    img_ph, stat_ph = left.empty(), right.empty()
-    img_ph.markdown(ui.skeleton(380), unsafe_allow_html=True)
-    t0 = time.time()
-    n_cb = [0]
+        def on_progress(f, msg="", info=None):
+            n_cb[0] += 1
+            phrase = THINK_INDEX[(n_cb[0] // 6) % len(THINK_INDEX)]
+            live_ph.markdown(ui.live(f"{phrase}…" if info else msg, f, eta_text(t0, f)), unsafe_allow_html=True)
+            if info:
+                img_ph.image(info["img"], use_container_width=True)
+                stat_ph.markdown(ui.stats([(f"{plural(cat).capitalize()} in this frame", info["people"], "blue"),
+                                           ("Different ones so far", info["tracks"], "")]), unsafe_allow_html=True)
 
-    def on_progress(f, msg="", info=None):
-        n_cb[0] += 1
-        phrase = THINK_INDEX[(n_cb[0] // 6) % len(THINK_INDEX)]
-        live_ph.markdown(ui.live(f"{phrase}…" if info else msg, f, eta_text(t0, f)), unsafe_allow_html=True)
-        if info:
-            img_ph.image(info["img"], use_container_width=True)
-            stat_ph.markdown(ui.stats([("People in this frame", info["people"], "blue"),
-                                       ("Different people so far", info["tracks"], "")]), unsafe_allow_html=True)
-
-    n = index_video(video, config.DATA_DIR / name.stem, stride, on_progress)
-    st.session_state.update(vid=name.stem, video=str(video), result=None)
-    st.rerun()
-
-vid = st.session_state.get("vid")
-if not vid:
+        index_video(video, config.video_dir(name.stem, cat), stride, on_progress, cat)
+        ss.update(vid=name.stem, category=cat, video=str(video), result=None)
+        go_to(STAGES[1])
     st.stop()
 
-d = config.DATA_DIR / vid
+d = config.video_dir(vid, category)
 dets, meta = load(d)
-n_people = len(set(dets["track"].tolist()))
-# frames, playback and inspector read the 1080p proxy written at index time when there is one
-play_src = str(d / "proxy.mp4") if meta.get("proxy") and (d / "proxy.mp4").exists() else st.session_state["video"]
+n_found = len(set(dets["track"].tolist()))
 prewarm()
+play_src = str(d / "proxy.mp4") if meta.get("proxy") and (d / "proxy.mp4").exists() else ss["video"]
+dur = meta["frames"] / meta["fps"]
 
 # ---------------------------------------------------------------- 2) ask
-with st.container(border=True):
-    st.markdown(f'<div class="sec">2 · Ask a question<small>{n_people} people found in '
-                f'{meta["frames"] / meta["fps"]:.0f}s of video</small></div>', unsafe_allow_html=True)
-    with st.form("ask", border=False):
-        c1, c2 = st.columns([5, 1])
-        q = c1.text_input("Question", key="q", placeholder="e.g. wearing a hat", label_visibility="collapsed")
-        submitted = c2.form_submit_button("Ask", type="primary", use_container_width=True)
-    chip_cols = st.columns(len(SUGGESTIONS))
-    for col, s_ in zip(chip_cols, SUGGESTIONS):
-        if col.button(s_, key=f"chip-{s_}", use_container_width=True):
-            st.session_state["q"] = s_
-            st.session_state["go"] = True
-            st.rerun()
+if stage == STAGES[1]:
+    left, right = st.columns([3, 2], gap="large")
+    with left:
+        with st.container(border=True):
+            st.markdown(f'<div class="sec">Ask about the {plural(category)}<small>{n_found} found in {dur:.0f}s of '
+                        f'video</small></div>', unsafe_allow_html=True)
+            with st.form("ask", border=False):
+                c1, c2 = st.columns([5, 1])
+                c1.text_input("Question", key="q", label_visibility="collapsed",
+                              placeholder="e.g. wearing a hat · went to the right · standing still")
+                submitted = c2.form_submit_button("Ask", type="primary", use_container_width=True)
+            chips = CHIPS.get(category, DEFAULT_CHIPS)
+            for col, s_ in zip(st.columns(len(chips)), chips):
+                if col.button(s_, key=f"chip-{s_}", use_container_width=True):
+                    ss["q"], ss["go"] = s_, True
+                    st.rerun()
+            st.checkbox("Look at several moments of each one (slower, better for actions like “using a phone”)",
+                        key="multi_override", value=False)
+    with right:
+        st.markdown("""<div class="glass"><div class="sec">What you can ask</div>
+<p class="hint"><b>Appearance</b> · “wearing a hat”, “red”, “carrying a bag”<br>Answered by an AI model that looks at each one.</p>
+<p class="hint"><b>Movement</b> · “went to the right”, “walking toward the camera”, “standing still”<br>
+Measured from how each one moves, corrected for camera shake. Instant.</p>
+<p class="hint"><b>Action</b> · “using a phone”, “talking”<br>The AI model sees a few moments of each one.</p></div>""",
+                    unsafe_allow_html=True)
 
-go = submitted or st.session_state.pop("go", False)
-if go and st.session_state.get("q"):
-    try:
-        attr = parse_attribute(st.session_state["q"])
-    except ValueError as e:
-        st.error(str(e))
-        st.stop()
-    steps_ph.markdown(ui.stepper(2, done=(1,)), unsafe_allow_html=True)
-    live_ph, count_ph, grid_ph = st.empty(), st.empty(), st.empty()
-    seen, total, t0 = {}, max(n_people, 1), time.time()
-    live_ph.markdown(ui.live("Waking up the vision model…", 0.0), unsafe_allow_html=True)
+    go = submitted or ss.pop("go", False)
+    if go and ss.get("q"):
+        try:
+            route = parse_question(ss["q"])
+        except ValueError as e:
+            st.error(str(e))
+            st.stop()
+        multi = route.get("multi", False) or ss.get("multi_override", False)
+        if route["kind"] == "motion":
+            if "box_ref" not in dets:
+                st.error("This video was indexed before movement questions existed. Index it again to enable them.")
+                st.stop()
+            with st.spinner("Measuring how everything moves…"):
+                scores = motion_scores(dets, route["motion"], meta["fps"])
+            mode = "motion"
+        else:
+            live_ph, count_ph, grid_ph = st.empty(), st.empty(), st.empty()
+            attr, seen, total, t0 = route["attribute"], {}, max(n_found, 1), time.time()
+            live_ph.markdown(ui.live("Waking up the vision model…", 0.0), unsafe_allow_html=True)
 
-    def on_result(t, v):
-        seen[t] = v
+            def on_result(t, v):
+                seen[t] = v
 
-    def on_progress(f):
-        yes_now = sum(1 for v in seen.values() if not np.isnan(v) and v >= threshold)
-        phrase = ["Looking closely at each person", f"Checking for “{attr}”", "Counting as we go"][int(f * 9) % 3]
-        live_ph.markdown(ui.live(f"{phrase}… {len(seen)}/{total}", f, eta_text(t0, f)), unsafe_allow_html=True)
-        count_ph.markdown(ui.stats([("Yes so far", yes_now, "yes"), ("Checked", len(seen), "blue")]), unsafe_allow_html=True)
-        recent = [(k, ui.thumb(d / "crops" / f"{t}.jpg")) for t, v in list(seen.items())[-60:][::-1]
-                  for k in ["unc" if np.isnan(v) else "yes" if v >= threshold else "no"]]
-        grid_ph.markdown(ui.grid([ui.tile(s, k, {"yes": "Yes", "no": "No", "unc": "?"}[k]) for k, s in recent if s]),
-                         unsafe_allow_html=True)
+            def on_progress(f):
+                yes_now = sum(1 for v in seen.values() if not np.isnan(v) and v >= threshold)
+                phrase = ["Looking closely at each one", f"Checking for “{attr}”", "Counting as we go"][int(f * 9) % 3]
+                live_ph.markdown(ui.live(f"{phrase}… {len(seen)}/{total}", f, eta_text(t0, f)), unsafe_allow_html=True)
+                count_ph.markdown(ui.stats([("Yes so far", yes_now, "yes"), ("Checked", len(seen), "blue")]),
+                                  unsafe_allow_html=True)
+                recent = [("unc" if np.isnan(v) else "yes" if v >= threshold else "no",
+                           ui.thumb(d / "crops" / f"{t}.jpg")) for t, v in list(seen.items())[-60:][::-1]]
+                grid_ph.markdown(ui.grid([ui.tile(s, k, {"yes": "Yes", "no": "No", "unc": "?"}[k])
+                                          for k, s in recent if s]), unsafe_allow_html=True)
 
-    scores = track_scores(d, dets["track"], attr, on_progress, on_result)
-    live_ph.empty(); count_ph.empty(); grid_ph.empty()
-    st.session_state["result"] = dict(attr=attr, scores=scores, p=detection_probs(dets["track"], scores), out=None,
-                                      thr=threshold)
-    st.rerun()
-
-res = st.session_state.get("result")
-if not res:
+            scores = track_scores(d, dets["track"], attr, on_progress, on_result, subject=category, multi=multi)
+            live_ph.empty(); count_ph.empty(); grid_ph.empty()
+            mode = "multi" if multi else "attr"
+        ss["result"] = dict(label=route["label"], mode=mode, scores=scores, out=None, thr=threshold,
+                            p=detection_probs(dets["track"], scores))
+        go_to(STAGES[2])
     st.stop()
 
 # ---------------------------------------------------------------- 3) explore
 p, scores = res["p"], res["scores"]
 yes_n, no_n, unclear_n = people_summary(scores, threshold)
 yes, tot = frame_counts(dets["frame"], p, meta["frames"], meta["stride"], threshold)
-st.markdown(f'<div class="sec">3 · “{res["attr"]}”</div>', unsafe_allow_html=True)
-st.markdown(ui.stats([("Yes", yes_n, "yes"), ("No", no_n, "no"), ("Too small to judge", unclear_n, "unc"),
+how = {"motion": "Movement · measured from tracks, no AI model needed", "attr": "Appearance · AI model, one view each",
+       "multi": "Action · AI model, several moments each"}[res["mode"]]
+st.markdown(f'<div class="sec">{plural(category).capitalize()} · “{res["label"]}”<small>{how}</small></div>',
+            unsafe_allow_html=True)
+st.markdown(ui.stats([("Yes", yes_n, "yes"), ("No", no_n, "no"),
+                      ("Too short to judge" if res["mode"] == "motion" else "Too small to judge", unclear_n, "unc"),
                       ("Peak in one frame", int(yes.max()) if len(yes) else 0, "blue")]), unsafe_allow_html=True)
-if res["thr"] != threshold:
+if res["mode"] == "motion" and meta.get("cam_speed", 0) > 0.02:
+    st.caption("The camera moved during this clip. Movement is corrected for it, but treat direction counts as approximate.")
+if res["thr"] != threshold and res["mode"] != "motion":
     st.caption("Threshold changed since the video was rendered: counts are live, the video is not. Ask again to re-render.")
 
-left, right = st.columns([3, 2])
+left, right = st.columns([3, 2], gap="large")
 with left:
     with st.container(border=True):
         st.markdown('<div class="sec">Annotated video</div>', unsafe_allow_html=True)
@@ -216,37 +268,33 @@ with left:
             vid_ph.markdown(ui.skeleton(340), unsafe_allow_html=True)
 with right:
     with st.container(border=True):
-        st.markdown('<div class="sec">Yes count over time</div>', unsafe_allow_html=True)
-        st.line_chart({"yes": yes, "all people": tot}, color=["#12b76a", "#0a3cff"])
-
-with st.container(border=True):
-    st.markdown('<div class="sec">Everyone, with the crop the model saw</div>', unsafe_allow_html=True)
-    show = st.radio("Show", ["Yes", "No", "Too small", "All"], horizontal=True, label_visibility="collapsed")
-    want = {"Yes": "yes", "No": "no", "Too small": "unc"}.get(show)
-    allt = tiles_for(scores, threshold, d, limit=0)
-    shown = [h for k, h in allt if want in (None, k)]
-    st.markdown('<div class="grid">' + "".join(shown[:240]) + "</div>" if shown else "Nobody in this group.",
-                unsafe_allow_html=True)
-    if len(shown) > 240:
-        st.caption(f"Showing 240 of {len(shown)}.")
-
-with st.expander("Inspect a single frame"):
-    fr = st.slider("Frame", 0, max(meta["frames"] - 1, 0), 0)
-    cap = cv2.VideoCapture(play_src)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, fr)
-    ok, img = cap.read()
-    cap.release()
-    if ok:
-        m = dets["frame"] == fr - fr % meta["stride"]
-        img = draw(img, dets["box"][m], dets["track"][m], p[m], threshold, f"frame {fr}: yes {yes[fr]} / {tot[fr]}")
-        st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        t_people, t_time, t_frame = st.tabs(["Everyone", "Over time", "Frame"])
+        with t_people:
+            show = st.radio("Show", ["Yes", "No", "Too small", "All"], horizontal=True, label_visibility="collapsed")
+            want = {"Yes": "yes", "No": "no", "Too small": "unc"}.get(show)
+            shown = [h for k, h in tiles_for(scores, threshold, d, numbers=res["mode"] != "motion") if want in (None, k)]
+            st.markdown('<div class="grid">' + "".join(shown[:240]) + "</div>" if shown else "Nobody in this group.",
+                        unsafe_allow_html=True)
+            if len(shown) > 240:
+                st.caption(f"Showing 240 of {len(shown)}.")
+        with t_time:
+            st.line_chart({"yes": yes, "all": tot}, color=["#12b76a", "#0a3cff"])
+        with t_frame:
+            fr = st.slider("Frame", 0, max(meta["frames"] - 1, 0), 0)
+            cap = cv2.VideoCapture(play_src)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, fr)
+            ok, img = cap.read()
+            cap.release()
+            if ok:
+                m = dets["frame"] == fr - fr % meta["stride"]
+                img = draw(img, dets["box"][m], dets["track"][m], p[m], threshold, f"frame {fr}: yes {yes[fr]} / {tot[fr]}")
+                st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
 # The video is rendered last: counts and faces above are already on screen, so the wait feels short.
 if not (res["out"] and Path(res["out"]).exists()):
     t0 = time.time()
-    ph = vid_ph
-    out = render_video(play_src, dets, meta, p, res["attr"], d / "annotated.mp4", threshold,
-                       lambda f: ph.markdown(ui.live("Drawing boxes on your video…", f, eta_text(t0, f)),
-                                             unsafe_allow_html=True))
+    out = render_video(play_src, dets, meta, p, res["label"], d / "annotated.mp4", threshold,
+                       lambda f: vid_ph.markdown(ui.live("Drawing boxes on your video…", f, eta_text(t0, f)),
+                                                 unsafe_allow_html=True))
     res["out"] = str(out)
-    ph.video(res["out"])
+    vid_ph.video(res["out"])

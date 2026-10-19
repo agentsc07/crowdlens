@@ -58,3 +58,29 @@ def test_track_scores_small_crops_unclear_and_cached(tmp_path, monkeypatch):
 def test_track_scores_no_tracks(tmp_path):
     (tmp_path / "crops").mkdir()
     assert score.track_scores(tmp_path, [], "wearing a hat") == {}
+
+
+def test_parse_question_routes():
+    from crowdlens.score import parse_question
+
+    assert parse_question("how many people went to the right")["motion"] == "right"
+    assert parse_question("who is standing still")["motion"] == "still"
+    assert parse_question("people walking toward the camera")["motion"] == "toward"
+    assert parse_question("wearing a hat") == {"kind": "attr", "attribute": "wearing a hat", "multi": False, "label": "wearing a hat"}
+    assert parse_question("how many people are using a phone")["multi"] is True
+
+
+def test_motion_classify_and_scores():
+    from crowdlens import motion
+
+    # a person 100px tall drifting 100px right over 2s, a stationary one, and one seen too briefly
+    f = np.arange(0, 20, 2)
+    box = lambda cx, cy: np.stack([cx - 20, cy - 50, cx + 20, cy + 50], 1).astype(float)
+    dets = dict(frame=np.concatenate([f, f, f[:2]]), track=np.array([1] * 10 + [2] * 10 + [3] * 2),
+                box_ref=np.vstack([box(np.linspace(0, 100, 10), np.full(10, 200.0)),
+                                   box(np.full(10, 300.0), np.full(10, 200.0)),
+                                   box(np.array([0.0, 5.0]), np.array([0.0, 0.0]))]))
+    right = motion.motion_scores(dets, "right", fps=10)
+    assert right[1] == 1.0 and right[2] == 0.0 and np.isnan(right[3])
+    assert motion.motion_scores(dets, "still", fps=10)[2] == 1.0
+    assert motion.motion_scores(dets, "moving", fps=10)[1] == 1.0

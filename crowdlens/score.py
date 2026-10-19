@@ -21,13 +21,46 @@ def parse_attribute(question):
     return q
 
 
-def track_scores(out_dir, tracks, attribute, progress=None, on_result=None):
-    """-> {track_id: P(yes) or NaN}. Cached per attribute in answers.json."""
+MOTION_LABELS = {"right": "moving right", "left": "moving left", "toward": "coming toward the camera",
+                 "away": "moving away from the camera", "still": "standing still", "moving": "moving"}
+_MOTION_RULES = [
+    ("still", re.compile(r"\b(standing still|stationary|not moving|motionless|stopped|staying still|idle|static)\b")),
+    ("toward", re.compile(r"\b(toward|towards|approaching|approach|coming closer|closer to the camera)\b")),
+    ("away", re.compile(r"\b(away from|walking away|going away|moving away|heading away|leaving)\b")),
+    ("right", re.compile(r"\b(to the right|rightwards?|(going|went|moving|moved|walking|walked|heading|headed|turning|turned|go|walk|run|running)\s+(to\s+)?(the\s+)?right)\b")),
+    ("left", re.compile(r"\b(to the left|leftwards?|(going|went|moving|moved|walking|walked|heading|headed|turning|turned|go|walk|run|running)\s+(to\s+)?(the\s+)?left)\b")),
+    ("moving", re.compile(r"^(how many )?(people|persons|everyone|objects|cars|vehicles)?\s*(are |is )?(moving|in motion|walking)\??$")),
+]
+# actions are about what someone does over time, so one still crop is weak evidence: look at several moments
+_ACTION = re.compile(r"\b(running|talking|waving|using|texting|eating|drinking|smoking|dancing|jumping|pointing|filming|"
+                     r"photographing|shaking|hugging|pushing|pulling|sitting|crossing|looking at|on (a|the|their) phone|"
+                     r"speaking|laughing|stretching|kneeling|bending)\b")
+
+
+def parse_question(question):
+    """Route a question. -> {"kind": "motion", "motion": ..., "label": ...} (answered from track geometry)
+    or {"kind": "attr", "attribute": ..., "multi": bool, "label": ...} (answered by the VLM)."""
+    q = question.strip().rstrip("?.! ").lower()
+    for kind, rx in _MOTION_RULES:
+        if rx.search(q):
+            return {"kind": "motion", "motion": kind, "label": MOTION_LABELS[kind]}
+    attr = parse_attribute(question)
+    return {"kind": "attr", "attribute": attr, "multi": bool(_ACTION.search(attr.lower())), "label": attr}
+
+
+def _cache_key(attribute, subject, multi):
+    return attribute if subject == "person" and not multi else f"{subject}|{attribute}|{'multi' if multi else 'single'}"
+
+
+def track_scores(out_dir, tracks, attribute, progress=None, on_result=None, subject="person", multi=False):
+    """-> {track_id: P(yes) or NaN}. Cached per question in answers.json.
+    multi: show the VLM several moments of each object (needs the _s<k> crops saved at index time)."""
     out_dir = Path(out_dir)
     cache_f = out_dir / "answers.json"
     cache = json.loads(cache_f.read_text()) if cache_f.exists() else {}
-    if attribute in cache:
-        return {int(k): (np.nan if v is None else v) for k, v in cache[attribute].items()}
+    key = _cache_key(attribute, subject, multi)
+    if key in cache:
+        return {int(k): (np.nan if v is None else v) for k, v in cache[key].items()}
     ids = sorted(set(int(t) for t in tracks))
     ok, small = [], []
     for t in ids:
@@ -46,10 +79,17 @@ def track_scores(out_dir, tracks, attribute, progress=None, on_result=None):
                 for t, v in zip(ok[start:start + len(got)], got):
                     on_result(t, v)
 
-        ps = vlm.p_yes([str(out_dir / "crops" / f"{t}.jpg") for t in ok], attribute, progress=progress,
-                       on_batch=on_batch)
+        def paths(t):
+            if multi:
+                moments = sorted((out_dir / "crops").glob(f"{t}_s*.jpg"))
+                if len(moments) > 1:
+                    return [str(m) for m in moments]
+            return [str(out_dir / "crops" / f"{t}.jpg")]
+
+        ps = vlm.p_yes([paths(t) for t in ok], attribute, subject=subject, batch=4 if multi else 8,
+                       progress=progress, on_batch=on_batch)
         scores.update(zip(ok, ps))
-    cache[attribute] = {str(k): (None if np.isnan(v) else v) for k, v in scores.items()}
+    cache[key] = {str(k): (None if np.isnan(v) else v) for k, v in scores.items()}
     cache_f.write_text(json.dumps(cache))
     return scores
 

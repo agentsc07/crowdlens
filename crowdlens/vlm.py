@@ -1,6 +1,7 @@
 """Small open VLM as a closed yes/no classifier: read P(Yes) vs P(No) from the next-token logits.
 One forward pass per crop, no generated text."""
 import threading
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -33,27 +34,31 @@ def _load_locked():
     return _state
 
 
-def _small(path):
+def _small(path, side):
     """Shrink the crop so the VLM sees few image tokens: this is the main latency and memory knob."""
     img = Image.open(path).convert("RGB")
-    img.thumbnail((config.VLM_CROP_MAX, config.VLM_CROP_MAX))
+    img.thumbnail((side, side))
     return img
 
 
-def prewarm():
-    """Load the model ahead of the first question (called from a background thread)."""
-    _load()
+def prompt(attribute, subject, n):
+    if n == 1:
+        return f"Is this {subject} {attribute}? Answer Yes or No."
+    return (f"These {n} images show the same {subject} at {n} different moments, in time order. "
+            f"Is this {subject} {attribute}? Answer Yes or No.")
 
 
-def p_yes(paths, attribute, batch=8, progress=None, on_batch=None):
-    """paths: crop image files -> P(yes) per crop, in order."""
+def p_yes(items, attribute, subject="person", batch=8, progress=None, on_batch=None):
+    """items: one entry per object, a crop path or a list of paths (moments of the same object, in time order)
+    -> P(yes) per object, in order."""
     model, proc, dev, yes_id, no_id = _load()
+    items = [[x] if isinstance(x, (str, Path)) else list(x) for x in items]
     out = []
-    for s in range(0, len(paths), batch):
-        msgs = [[{"role": "user", "content": [
-            {"type": "image", "image": _small(p)},
-            {"type": "text", "text": f"Is this person {attribute}? Answer Yes or No."}]}]
-            for p in paths[s:s + batch]]
+    for s in range(0, len(items), batch):
+        chunk = items[s:s + batch]
+        side = config.VLM_CROP_MAX if max(len(c) for c in chunk) == 1 else config.VLM_MULTI_CROP_MAX
+        msgs = [[{"role": "user", "content": [{"type": "image", "image": _small(p, side)} for p in c]
+                 + [{"type": "text", "text": prompt(attribute, subject, len(c))}]}] for c in chunk]
         inp = proc.apply_chat_template(msgs, add_generation_prompt=True, tokenize=True, return_dict=True,
                                        return_tensors="pt", padding=True).to(dev)
         with torch.no_grad():
@@ -66,5 +71,5 @@ def p_yes(paths, attribute, batch=8, progress=None, on_batch=None):
         if dev == "mps":
             torch.mps.empty_cache()
         if progress:
-            progress(min((s + batch) / len(paths), 1.0))
+            progress(min((s + batch) / len(items), 1.0))
     return out
