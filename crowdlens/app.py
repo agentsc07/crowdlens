@@ -13,7 +13,7 @@ from crowdlens import config, ui
 from crowdlens.index import index_video, load
 from crowdlens.motion import motion_scores
 from crowdlens.render import draw, render_video
-from crowdlens.score import detection_probs, frame_counts, parse_question, people_summary, track_scores
+from crowdlens.score import detection_probs, frame_counts, is_cached, parse_question, people_summary, track_scores
 
 st.set_page_config(page_title="CrowdLens", page_icon="🔍", layout="wide")
 st.markdown(ui.CSS, unsafe_allow_html=True)
@@ -292,7 +292,7 @@ Measured from how each one moves, corrected for camera shake. Instant.</p>
                                           for k, s in recent if s]), unsafe_allow_html=True)
 
             only = None
-            if config.SHORTLIST and not multi:  # hosted CPU demo: verify only the SigLIP2 shortlist (search-then-verify)
+            if config.SHORTLIST and not multi and not is_cached(d, attr, category):  # hosted CPU demo: verify only the SigLIP2 shortlist (search-then-verify)
                 from crowdlens import search
                 only = set(search.shortlist(search.similarity(d, attr, category), config.SHORTLIST))
             scores = track_scores(d, dets["track"], attr, on_progress, on_result, subject=category, multi=multi, only=only)

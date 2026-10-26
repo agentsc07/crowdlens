@@ -52,6 +52,11 @@ def _cache_key(attribute, subject, multi):
     return attribute if subject == "person" and not multi else f"{subject}|{attribute}|{'multi' if multi else 'single'}"
 
 
+def is_cached(out_dir, attribute, subject="person", multi=False):
+    f = Path(out_dir) / "answers.json"
+    return f.exists() and _cache_key(attribute, subject, multi) in json.loads(f.read_text())
+
+
 def track_scores(out_dir, tracks, attribute, progress=None, on_result=None, subject="person", multi=False, only=None):
     """-> {track_id: P(yes) or NaN}. Cached per question in answers.json.
     multi: show the VLM several moments of each object (needs the _s<k> crops saved at index time).
