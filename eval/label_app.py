@@ -28,7 +28,7 @@ with st.form(f"form-{q}"):
         for col, p in zip(cols, people[i:i + COLS]):
             k = f"{p['clip']}:{p['track']}"
             with col:
-                st.image(str(EVAL / "idx" / p["clip"] / "crops" / f"{p['track']}.jpg"), use_container_width=True)
+                st.image(str(EVAL / "idx" / p["clip"] / "crops" / f"{p['track']}.jpg"), width="stretch")
                 yes[k] = st.checkbox("yes", value=prev.get(k) == 1, key=f"y-{q}-{k}")
                 unsure[k] = st.checkbox("unsure", value=prev.get(k) == -1, key=f"u-{q}-{k}")
     if st.form_submit_button("Save this question", type="primary"):
