@@ -1,6 +1,6 @@
 # CrowdLens
 
-**Live demo:** _Streamlit Community Cloud link added after deployment_ (demo-only: 3 pre-indexed clips, no uploads) · **Code:** _GitHub link added after repo creation_ · **Package:** `pip install crowdlens` (wheel built, not yet on PyPI)
+**Live demo:** https://crowdlens.streamlit.app/ (demo-only: 3 pre-indexed clips, no uploads) · **Code:** https://github.com/agentsc07/crowdlens · **Package:** `pip install crowdlens` (wheel built, not yet on PyPI)
 
 > Ask a crowd video a plain-English question ("how many people are wearing a red top?") and get a count plus a thumbnail of every person it counted. Fully local, open models, attributes only, never identities.
 
