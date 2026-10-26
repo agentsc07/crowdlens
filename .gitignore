@@ -14,3 +14,5 @@ secrets*
 *.egg-info/
 dist/
 build/
+_holding/*
+!_holding/.gitkeep

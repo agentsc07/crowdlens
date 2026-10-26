@@ -13,7 +13,7 @@ from crowdlens import config, ui
 from crowdlens.index import index_video, load
 from crowdlens.motion import motion_scores
 from crowdlens.render import draw, render_video
-from crowdlens.score import detection_probs, frame_counts, is_cached, parse_question, people_summary, track_scores
+from crowdlens.score import detection_probs, frame_counts, is_cached, parse_question, people_summary, quick_scores, track_scores
 
 st.set_page_config(page_title="CrowdLens", page_icon="🔍", layout="wide")
 st.markdown(ui.CSS, unsafe_allow_html=True)
@@ -55,7 +55,7 @@ def prewarm():
     """Load the VLM in the background while the user is busy indexing / typing, so the first question
     doesn't pay the model-load cost."""
     state = _warm_state()
-    if state["started"]:
+    if state["started"] or config.DEMO:
         return
     state["started"] = True
 
@@ -147,6 +147,11 @@ vid, category = ss.get("vid"), ss.get("category", "person")
 res = ss.get("result")
 
 st.markdown(ui.hero(), unsafe_allow_html=True)
+if config.DEMO:
+    st.info("**Hosted demo.** Pick one of three pre-indexed MOT17 clips. The preset questions show fully verified answers "
+            "(Qwen3-VL, computed offline). Anything else you type gets a **quick answer** from image-text search, "
+            "which is unverified. Full verification, uploads and your own videos run locally: see the video and CLI "
+            "in the GitHub README.", icon="ℹ️")
 nav, cfg = st.columns([5, 1])
 with nav:
     st.segmented_control("Stage", STAGES, key="stage", label_visibility="collapsed")
@@ -168,7 +173,8 @@ if stage == STAGES[0]:
     with left:
         with st.container(border=True):
             st.markdown('<div class="sec">Choose a video</div>', unsafe_allow_html=True)
-            up = st.file_uploader("Upload a video", type=["mp4", "mov", "avi"], label_visibility="collapsed")
+            up = None if config.DEMO else st.file_uploader("Upload a video", type=["mp4", "mov", "avi"],
+                                                           label_visibility="collapsed")
             existing = indexed_videos()
             if existing:
                 pick = st.selectbox("…or reopen one you've already indexed", [None] + existing,
@@ -179,9 +185,11 @@ if stage == STAGES[0]:
     with right:
         with st.container(border=True):
             st.markdown('<div class="sec">What should it look for?</div>', unsafe_allow_html=True)
-            cat = st.selectbox("Object type", config.CATEGORIES, format_func=lambda c: plural(c).capitalize(),
-                               label_visibility="collapsed")
-            st.caption("Everything of this type is found and followed through the video; then you ask about it.")
+            cat = "person" if config.DEMO else st.selectbox("Object type", config.CATEGORIES,
+                                                            format_func=lambda c: plural(c).capitalize(),
+                                                            label_visibility="collapsed")
+            st.caption("People are found and followed through each sample clip; then you ask about them." if config.DEMO else
+                       "Everything of this type is found and followed through the video; then you ask about it.")
             go_index = bool(up) and st.button("Index video", type="primary", use_container_width=True)
     job = _jobs().get("index")
     if go_index and not (job and not job["done"]):
@@ -247,8 +255,9 @@ if stage == STAGES[1]:
                 if col.button(s_, key=f"chip-{s_}", use_container_width=True):
                     ss["last_q"], ss["go"] = s_, True
                     st.rerun()
-            st.checkbox("Look at several moments of each one (slower, better for actions like “using a phone”)",
-                        key="multi_override", value=False)
+            if not config.DEMO:
+                st.checkbox("Look at several moments of each one (slower, better for actions like “using a phone”)",
+                            key="multi_override", value=False)
     with right:
         st.markdown("""<div class="glass"><div class="sec">What you can ask</div>
 <p class="hint"><b>Appearance</b> · “wearing a hat”, “red”, “carrying a bag”<br>Answered by an AI model that looks at each one.</p>
@@ -272,6 +281,10 @@ Measured from how each one moves, corrected for camera shake. Instant.</p>
             with st.spinner("Measuring how everything moves…"):
                 scores = motion_scores(dets, route["motion"], meta["fps"])
             mode = "motion"
+        elif config.DEMO and not is_cached(d, route["attribute"], category):
+            with st.spinner("Searching every crop for your question…"):
+                scores = quick_scores(d, dets["track"], route["attribute"], category)
+            mode = "quick"
         else:
             live_ph, count_ph, grid_ph = st.empty(), st.empty(), st.empty()
             attr, seen, total, t0 = route["attribute"], {}, max(n_found, 1), time.time()
@@ -309,12 +322,18 @@ p, scores = res["p"], res["scores"]
 yes_n, no_n, unclear_n = people_summary(scores, threshold)
 yes, tot = frame_counts(dets["frame"], p, meta["frames"], meta["stride"], threshold)
 how = {"motion": "Movement · measured from tracks, no AI model needed", "attr": "Appearance · AI model, one view each",
-       "multi": "Action · AI model, several moments each"}[res["mode"]]
+       "multi": "Action · AI model, several moments each",
+       "quick": "Quick answer · image-text search only, unverified"}[res["mode"]]
 st.markdown(f'<div class="sec">{plural(category).capitalize()} · “{res["label"]}”<small>{how}</small></div>',
             unsafe_allow_html=True)
 st.markdown(ui.stats([("Yes", yes_n, "yes"), ("No", no_n, "no"),
                       ("Too short to judge" if res["mode"] == "motion" else "Too small to judge", unclear_n, "unc"),
                       ("Peak in one frame", int(yes.max()) if len(yes) else 0, "blue")]), unsafe_allow_html=True)
+if res["mode"] == "quick":
+    st.warning("**Quick answer, unverified.** People are ranked by how well their picture matches your words; no model "
+               "checked each one. The count is a rough guide (it tends toward about a tenth of people whatever you ask), "
+               "so trust the ranking and the thumbnails more than the number. Full verification (Qwen3-VL) runs locally: "
+               "see the video and CLI in the GitHub README.")
 if res["mode"] == "motion" and meta.get("cam_speed", 0) > 0.02:
     st.caption("The camera moved during this clip. Movement is corrected for it, but treat direction counts as approximate.")
 if res["thr"] != threshold and res["mode"] != "motion":

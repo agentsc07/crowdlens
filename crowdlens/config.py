@@ -1,8 +1,14 @@
 import os
 from pathlib import Path
 
+import importlib.util
+
+# CROWDLENS_DEMO=1 (or no torch installed) is the free hosted demo: pre-indexed samples only, cached verified answers,
+# and a quick text-to-crop search for any other question. No model weights are loaded except the numpy text encoder.
+DEMO = os.environ.get("CROWDLENS_DEMO") == "1" or importlib.util.find_spec("torch") is None
 # kept out of iCloud-synced folders (Desktop/Documents): proxies and crops churn thousands of files
-DATA_DIR = Path(os.environ.get("CROWDLENS_DATA", Path.home() / ".crowdlens" / "data"))
+DATA_DIR = Path(os.environ.get("CROWDLENS_DATA", Path(__file__).resolve().parent.parent / "space_data" if DEMO
+                               else Path.home() / ".crowdlens" / "data"))
 # CROWDLENS_LITE=1 is the free-CPU hosted demo: coarser frame stride, smaller crops, a short upload limit, and new
 # questions only verify the SigLIP2 shortlist
 LITE = os.environ.get("CROWDLENS_LITE") == "1"

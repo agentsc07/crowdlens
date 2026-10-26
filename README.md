@@ -1,6 +1,6 @@
 # CrowdLens
 
-**Live demo:** _Hugging Face Space: link added after deployment_ · **Code:** _GitHub link added after repo creation_ · **Package:** `pip install crowdlens` (wheel built, not yet on PyPI)
+**Live demo:** _Streamlit Community Cloud link added after deployment_ (demo-only: 3 pre-indexed clips, no uploads) · **Code:** _GitHub link added after repo creation_ · **Package:** `pip install crowdlens` (wheel built, not yet on PyPI)
 
 > Ask a crowd video a plain-English question ("how many people are wearing a red top?") and get a count plus a thumbnail of every person it counted. Fully local, open models, attributes only, never identities.
 
@@ -47,6 +47,13 @@ flowchart LR
 Top 50 % matches verify-everyone accuracy at half the VLM calls (about 2x faster per question on this machine; measured seconds are noisy because the laptop was memory-starved, the call ratio is the robust number). The hoped-for "over 95 % recall at a large saving" is **not reached** with SigLIP2-base: it ranks "shopping bag" (AP 0.23) and "black jacket" (0.55) poorly. Full tables: `eval/results.md`.
 
 **Speed.** Indexing a 15 s 1080p clip takes about 20 s on an Apple-silicon laptop. A question over ~160 people takes roughly 40 to 120 s verifying everyone (0.26 to 0.7 s per person depending on machine load). The free-CPU hosted demo is slower; its CPU timing is **not yet measured** (my laptop was swapping when I tried), so sample questions are pre-answered.
+
+## Hosted demo vs the full app
+Free hosting could not run the full app (Hugging Face now charges for Docker Spaces; free Streamlit Cloud has 1 GB of RAM), so the hosted demo is deliberately small:
+- **Preset questions** show the fully verified Qwen3-VL answers, computed offline on the 3 pre-indexed MOT17 clips.
+- **Any other question** gets a **quick answer, labelled unverified**: a NumPy port of the SigLIP2 text encoder (no torch; 259 MB of int8/fp16 weights, memory-mapped) ranks the stored person crops against your words. Peak RAM measured at 655 MB. The encoder matches the PyTorch text tower at cosine 0.9997 on English queries (non-Latin text is not supported).
+- **How good is the quick count?** Weak, and the demo says so: SigLIP2's own probabilities summed over people give 90 % mean count error; the rule used (similarity above mean + 1.25 sd) gets 26 % but mostly predicts "about a tenth of people", whatever you ask. Ranking is the useful part (see `eval/quick_count.md`).
+- Uploads and full verification run locally (app or CLI). `Dockerfile` and `deploy/push_space.sh` remain for anyone with a paid Space.
 
 ## Privacy
 CrowdLens counts attributes, never identities. No face recognition, no "find this person", no linking people across videos. Track numbers are temporary ids that exist inside one video's index only. Sample footage is the public MOT17 benchmark.

@@ -108,3 +108,16 @@ def test_shortlist_run_reuses_full_cached_answer(tmp_path, monkeypatch):
     from crowdlens import vlm
     monkeypatch.setattr(vlm, "p_yes", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not run")))
     assert score.track_scores(tmp_path, [1], "wearing a hat", only={1}) == {1: 0.8}
+
+
+def test_quick_scores_ranks_by_similarity_and_marks_small_unclear(tmp_path, monkeypatch):
+    import cv2
+    (tmp_path / "crops").mkdir()
+    for t in range(1, 21):
+        cv2.imwrite(str(tmp_path / f"crops/{t}.jpg"), np.zeros((200, 80, 3), np.uint8))
+    cv2.imwrite(str(tmp_path / "crops/99.jpg"), np.zeros((20, 10, 3), np.uint8))
+    from crowdlens import search
+    sims = {t: 0.1 + 0.001 * t for t in range(1, 21)}; sims[20] = 0.5; sims[99] = 0.9
+    monkeypatch.setattr(search, "similarity", lambda d, a, s="person": sims)
+    s = score.quick_scores(tmp_path, list(range(1, 21)) + [99], "wearing a scarf")
+    assert np.isnan(s[99]) and s[20] > 0.9 and s[1] < 0.5 and s[20] == max(v for v in s.values() if not np.isnan(v))

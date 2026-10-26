@@ -15,6 +15,8 @@ Held-out F1 at 0.9: 0.86. Search-then-verify: top 30 % keeps 82 % of true matche
 
 **Findings.** The VLM over-says yes at 0.5, so a high threshold matters more than any model change. Count error stays well above the 10 % target. Search-then-verify halves the cost without losing accuracy but SigLIP2-base is too weak to cut it further, especially for objects (shopping bag AP 0.23).
 
+**Hosted demo.** Free hosting forced a demo-only design: preset questions use cached verified answers; other questions get an unverified SigLIP2 search answer from a NumPy text encoder (655 MB peak RAM). That quick count has 26 % mean error but mostly reflects a prior of about 10 % of people matching, so it is shown as a rough guide next to the ranking.
+
 **Limitations.** Labels are machine-made from low-resolution crops (human audit of 30 people pending); few positives per question; one machine, noisy timings; hosted CPU speed not measured; track fragmentation inflates counts; regex router; 15 s clips; MOT17 is non-commercial.
 
 **Next steps.** Run the human audit and re-run `eval/metrics.py`; larger SigLIP2 (so400m) or a fine-tuned attribute head for the shortlist; merge fragmented tracks (re-identification within a video only, attributes not identities); calibrate per question; measure CPU latency on the hosted Space; replace the regex router with a small language-model parse that splits compound questions.

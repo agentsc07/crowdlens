@@ -105,6 +105,33 @@ def track_scores(out_dir, tracks, attribute, progress=None, on_result=None, subj
     return scores
 
 
+QUICK_Z = 1.25  # similarity z-score above which a crop counts as a match in the quick answer (eval/quick_count.md)
+
+
+def quick_scores(out_dir, tracks, attribute, subject="person"):
+    """Quick, UNVERIFIED answer from image-text search alone (no VLM): -> {track: pseudo-probability, NaN if too small}.
+    A crop is a match when its SigLIP2 similarity to the question is QUICK_Z standard deviations above the video's
+    average, mapped so that it sits at 0.9 (the default yes threshold). The count it implies mostly reflects 'about
+    a tenth of people match', so it is a rough guide, not a measurement."""
+    from . import search
+
+    out_dir = Path(out_dir)
+    sims = search.similarity(out_dir, attribute, subject)
+    ids = sorted(set(int(t) for t in tracks))
+    ok = []
+    for t in ids:
+        f = out_dir / "crops" / f"{t}.jpg"
+        img = cv2.imread(str(f)) if f.exists() else None
+        if img is not None and img.shape[0] >= config.MIN_CROP_H and t in sims:
+            ok.append(t)
+    v = np.array([sims[t] for t in ok], dtype="float64")
+    z = (v - v.mean()) / (v.std() + 1e-9) if len(v) else v
+    p = 1 / (1 + np.exp(-(2.0 * (z - QUICK_Z) + np.log(0.9 / 0.1))))
+    scores = {t: float("nan") for t in ids}
+    scores.update(zip(ok, p.tolist()))
+    return scores
+
+
 def detection_probs(tracks, scores):
     return np.array([scores.get(int(t), np.nan) for t in tracks], dtype="float64")
 

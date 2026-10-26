@@ -4,8 +4,6 @@ import threading
 from pathlib import Path
 
 import numpy as np
-import torch
-from PIL import Image
 
 from . import config
 
@@ -14,6 +12,8 @@ _lock = threading.Lock()
 
 
 def _load():
+    import torch
+
     global _state
     with _lock:
         if _state is None:
@@ -31,6 +31,9 @@ def _norm(x):
 
 
 def embed_images(paths, batch=32):
+    import torch
+    from PIL import Image
+
     model, proc, dev = _load()
     out = []
     for s in range(0, len(paths), batch):
@@ -42,6 +45,12 @@ def embed_images(paths, batch=32):
 
 
 def embed_text(texts):
+    if config.DEMO:  # numpy text tower, no torch
+        from . import textenc
+
+        return textenc.embed_text(texts)
+    import torch
+
     model, proc, dev = _load()
     # SigLIP was trained with fixed-length padding
     inp = proc(text=texts, padding="max_length", max_length=64, return_tensors="pt").to(dev)

@@ -17,6 +17,8 @@ crowdlens ask video.mp4 "wearing a red shirt?" [--search 0.5] [--json]
 ```
 Hosted demo (Docker): `docker build -t crowdlens . && docker run -p 7860:7860 crowdlens` then http://localhost:7860.
 
+**Demo mode (no torch, ~650 MB):** `pip install -r requirements.txt && CROWDLENS_DEMO=1 streamlit run crowdlens/app.py` serves only the pre-indexed samples in `space_data/`. It switches on automatically when torch is not installed.
+
 **Stop:** Ctrl+C. **Tests:** `pytest` (12 pass).
 
 **Common problems**

@@ -1,0 +1,6 @@
+# hosted demo (Streamlit Community Cloud): no torch, no model weights; the text encoder is NumPy
+numpy
+opencv-python-headless
+pillow
+streamlit
+tokenizers
