@@ -1,6 +1,6 @@
 # CrowdLens
 
-**Live demo:** https://crowdlens.streamlit.app/ (demo-only: 3 pre-indexed clips, no uploads) · **Code:** https://github.com/agentsc07/crowdlens · **Package:** `pip install crowdlens` (wheel built, not yet on PyPI)
+**Live demo:** https://crowdlens.streamlit.app/ (demo-only: 3 pre-indexed clips, no uploads) · **Code:** https://github.com/agentsc07/crowdlens
 
 > Ask a crowd video a plain-English question ("how many people are wearing a red top?") and get a count plus a thumbnail of every person it counted. Fully local, open models, attributes only, never identities.
 
@@ -60,7 +60,7 @@ CrowdLens counts attributes, never identities. No face recognition, no "find thi
 
 ## Run it
 ```bash
-pip install crowdlens            # after it is published; today: pip install dist/crowdlens-0.3.0-py3-none-any.whl
+git clone https://github.com/agentsc07/crowdlens && cd crowdlens && pip install -e .   # gives the `crowdlens` command
 crowdlens index video.mp4
 crowdlens ask video.mp4 "wearing a red shirt?"          # add --search 0.5 for search-then-verify
 python -m streamlit run crowdlens/app.py                # the web app

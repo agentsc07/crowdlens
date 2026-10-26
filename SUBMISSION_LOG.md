@@ -8,7 +8,7 @@ Working log for `SUBMISSION_TASK.md`. Decisions are dated 2026-10-26 unless note
 - [ ] Step 2: metrics (P/R/F1, count error %, time per question), threshold chosen on a held-out clip
 - [ ] Step 3: search-then-verify with SigLIP2 shortlist, accuracy vs time vs verify-everyone
 - [ ] Step 4: Hugging Face Space (Streamlit, CPU), 2-3 pre-indexed samples + upload up to ~15 s
-- [ ] Step 5: `pip install crowdlens` + CLI (`index`, `ask`); ask before PyPI
+- [x] Step 5: CLI built (`crowdlens index|ask`); PyPI dropped by the user
 - [ ] Step 6: README (grader), docs/report.md, docs/demo-script.md, privacy section, links at top
 - [ ] GitHub repo under agentsc07 (private first; ask before public)
 - [ ] startup.md (global CLAUDE.md rule for runnable projects)
@@ -66,3 +66,4 @@ Working log for `SUBMISSION_TASK.md`. Decisions are dated 2026-10-26 unless note
 - D18: Quick count honesty: SigLIP2 sigmoid probabilities sum to 0.1 to 4 vs true 9 to 25 (90 % error); the z>1.25 rule gets 26 % LOO error but predicts 11 to 15 for every question (a prior, not signal). The UI says so; ranking is presented as the real output. Details in `eval/quick_count.md`.
 - D19: Stale v1 tokenizer/idmap moved to `_holding/demo_assets_v1/` (moved, not deleted).
 - D20: Live app at https://crowdlens.streamlit.app/ first showed "Indexing failed: cannot import name 'RFDETRNano'": Streamlit Cloud installed the full `pyproject.toml` deps (torch, rfdetr; on Python 3.14), so torch was importable and demo mode never switched on. Fix: `demo/streamlit_app.py` forces `CROWDLENS_DEMO=1` and `demo/requirements.txt` sits next to it so the light list is used. Entry point on Streamlit Cloud must be changed to `demo/streamlit_app.py` (and Python 3.11 or 3.12 chosen in Advanced settings). Verified in AppTest both with torch installed and in the clean no-torch env.
+- D21: User confirmed the live demo works and decided **not to publish to PyPI** (no need for a package). README no longer mentions a PyPI package; the CLI stays, installed with `pip install -e .` from the repo. The wheel in `dist/` is git-ignored and unused. Step 5's PyPI part is closed as "not doing".
