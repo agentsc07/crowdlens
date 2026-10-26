@@ -84,3 +84,17 @@ def test_motion_classify_and_scores():
     assert right[1] == 1.0 and right[2] == 0.0 and np.isnan(right[3])
     assert motion.motion_scores(dets, "still", fps=10)[2] == 1.0
     assert motion.motion_scores(dets, "moving", fps=10)[1] == 1.0
+
+
+def test_track_scores_shortlist_only_verifies_shortlist(tmp_path, monkeypatch):
+    import cv2
+    (tmp_path / "crops").mkdir()
+    for t in (1, 2, 3):
+        cv2.imwrite(str(tmp_path / f"crops/{t}.jpg"), np.zeros((200, 80, 3), np.uint8))
+    calls = []
+    from crowdlens import vlm
+    monkeypatch.setattr(vlm, "p_yes", lambda paths, a, **k: calls.append(paths) or [0.9] * len(paths))
+    s = score.track_scores(tmp_path, [1, 2, 3], "wearing a hat", only={2})
+    assert s == {1: 0.0, 2: 0.9, 3: 0.0} and len(calls[0]) == 1
+    full = score.track_scores(tmp_path, [1, 2, 3], "wearing a hat")  # separate cache entry from the shortlist run
+    assert full == {1: 0.9, 2: 0.9, 3: 0.9}

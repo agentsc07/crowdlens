@@ -52,22 +52,28 @@ def _cache_key(attribute, subject, multi):
     return attribute if subject == "person" and not multi else f"{subject}|{attribute}|{'multi' if multi else 'single'}"
 
 
-def track_scores(out_dir, tracks, attribute, progress=None, on_result=None, subject="person", multi=False):
+def track_scores(out_dir, tracks, attribute, progress=None, on_result=None, subject="person", multi=False, only=None):
     """-> {track_id: P(yes) or NaN}. Cached per question in answers.json.
-    multi: show the VLM several moments of each object (needs the _s<k> crops saved at index time)."""
+    multi: show the VLM several moments of each object (needs the _s<k> crops saved at index time).
+    only: search-then-verify. Track ids the VLM should check; everyone else scores 0.0 (screened out by search)."""
     out_dir = Path(out_dir)
     cache_f = out_dir / "answers.json"
     cache = json.loads(cache_f.read_text()) if cache_f.exists() else {}
     key = _cache_key(attribute, subject, multi)
+    if only is not None:
+        key += f"|shortlist{len(only)}"
     if key in cache:
         return {int(k): (np.nan if v is None else v) for k, v in cache[key].items()}
     ids = sorted(set(int(t) for t in tracks))
+    skipped = [t for t in ids if only is not None and t not in only]
+    ids = [t for t in ids if t not in skipped]
     ok, small = [], []
     for t in ids:
         f = out_dir / "crops" / f"{t}.jpg"
         img = cv2.imread(str(f)) if f.exists() else None
         (ok if img is not None and img.shape[0] >= config.MIN_CROP_H else small).append(t)
     scores = {t: float("nan") for t in small}
+    scores.update({t: 0.0 for t in skipped})
     if on_result:
         for t in small:
             on_result(t, float("nan"))

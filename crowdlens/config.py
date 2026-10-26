@@ -4,6 +4,7 @@ from pathlib import Path
 # kept out of iCloud-synced folders (Desktop/Documents): proxies and crops churn thousands of files
 DATA_DIR = Path(os.environ.get("CROWDLENS_DATA", Path.home() / ".crowdlens" / "data"))
 VLM_MODEL = "Qwen/Qwen3-VL-2B-Instruct"
+EMBED_MODEL = "google/siglip2-base-patch16-224"
 DETECT_WIDTH = 1080  # detection runs on a copy this wide, plus overlapping tiles
 TILE = 640
 DETECT_CONF = 0.4
