@@ -23,7 +23,7 @@ def _load_locked():
     if _state is None:
         from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
-        dev = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
+        dev = config.DEVICE or "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
         dtype = torch.float16 if dev != "cpu" else torch.float32
         proc = AutoProcessor.from_pretrained(config.VLM_MODEL)
         proc.tokenizer.padding_side = "left"

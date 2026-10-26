@@ -19,7 +19,7 @@ def _load():
         if _state is None:
             from transformers import AutoModel, AutoProcessor
 
-            dev = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
+            dev = config.DEVICE or "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
             model = AutoModel.from_pretrained(config.EMBED_MODEL).to(dev).eval()
             _state = (model, AutoProcessor.from_pretrained(config.EMBED_MODEL), dev)
     return _state

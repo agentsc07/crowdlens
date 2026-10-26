@@ -3,16 +3,22 @@ from pathlib import Path
 
 # kept out of iCloud-synced folders (Desktop/Documents): proxies and crops churn thousands of files
 DATA_DIR = Path(os.environ.get("CROWDLENS_DATA", Path.home() / ".crowdlens" / "data"))
+# CROWDLENS_LITE=1 is the free-CPU hosted demo: coarser frame stride, smaller crops, a short upload limit, and new
+# questions only verify the SigLIP2 shortlist
+LITE = os.environ.get("CROWDLENS_LITE") == "1"
+MAX_UPLOAD_SECONDS = 15.5 if LITE else None
+SHORTLIST = 12 if LITE else 0
+DEVICE = os.environ.get("CROWDLENS_DEVICE")  # force "cpu" / "cuda" / "mps"; default is auto
 VLM_MODEL = "Qwen/Qwen3-VL-2B-Instruct"
 EMBED_MODEL = "google/siglip2-base-patch16-224"
 DETECT_WIDTH = 1080  # detection runs on a copy this wide, plus overlapping tiles
 TILE = 640
 DETECT_CONF = 0.4
 MIN_TRACK_DETS = 3  # a person must appear in at least this many processed frames
-DEFAULT_STRIDE = 4   # run the detector on every Nth frame; boxes are held in between
-THRESHOLD = 0.5
+DEFAULT_STRIDE = 8 if LITE else 4   # run the detector on every Nth frame; boxes are held in between
+THRESHOLD = 0.9  # picked on MOT17 clips 02/04/09 (eval/metrics.py); 0.5 over-says yes (precision 0.48)
 MIN_CROP_H = 64      # best crop shorter than this is too small to judge -> "unclear"
-VLM_CROP_MAX = 224  # longest side of a crop fed to the VLM, in pixels
+VLM_CROP_MAX = 128 if LITE else 224  # longest side of a crop fed to the VLM, in pixels
 PREVIEW_MAX = 960  # longest side of the annotated preview video, in pixels
 MIN_MOTION_DETS = 4      # a track needs this many detections ...
 MIN_MOTION_SECONDS = 1.0  # ... spanning at least this long before its movement is judged

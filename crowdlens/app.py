@@ -18,6 +18,16 @@ from crowdlens.score import detection_probs, frame_counts, parse_question, peopl
 st.set_page_config(page_title="CrowdLens", page_icon="🔍", layout="wide")
 st.markdown(ui.CSS, unsafe_allow_html=True)
 
+ATTRIBUTION = ("Sample clips: first 15 s of MOT17 sequences 02, 04 and 11 (Milan et al., 2016, "
+               "[motchallenge.net](https://motchallenge.net/data/MOT17/)), licensed CC BY-NC-SA 3.0: non-commercial use, "
+               "attribution, share-alike. CrowdLens counts attributes only, never identities; track numbers exist for one video only.")
+
+
+def footer():
+    st.markdown("---")
+    st.caption(ATTRIBUTION)
+
+
 STAGES = ["1 · Video", "2 · Ask", "3 · Explore"]
 THINK_INDEX = ["Scanning every corner of the frame", "Zooming in on distant objects", "Following them between frames",
                "Picking each one's sharpest view"]
@@ -140,7 +150,7 @@ with nav:
 with cfg:
     with st.popover("Settings", use_container_width=True):
         stride = st.select_slider("Look at every Nth frame (higher = faster)", [1, 2, 3, 4, 6, 8], config.DEFAULT_STRIDE)
-        threshold = st.slider("Yes threshold", 0.1, 0.9, config.THRESHOLD, 0.05)
+        threshold = st.slider("Yes threshold", 0.1, 0.95, config.THRESHOLD, 0.05)
 stage = ss.get("stage") or STAGES[0]
 if stage != STAGES[0] and not vid:
     stage = STAGES[0]
@@ -177,6 +187,14 @@ if stage == STAGES[0]:
         config.DATA_DIR.mkdir(parents=True, exist_ok=True)
         video = config.DATA_DIR / f"{name.stem}{name.suffix}"
         video.write_bytes(up.getvalue())
+        cap = cv2.VideoCapture(str(video))
+        secs = cap.get(cv2.CAP_PROP_FRAME_COUNT) / (cap.get(cv2.CAP_PROP_FPS) or 30.0)
+        cap.release()
+        if config.MAX_UPLOAD_SECONDS and secs > config.MAX_UPLOAD_SECONDS:
+            st.error(f"This hosted demo takes clips up to 15 s on a free CPU; yours is {secs:.0f} s. "
+                     "Trim it, or run CrowdLens locally for longer videos.")
+            footer()
+            st.stop()
         job = dict(done=False, error=None, f=0.0, msg="Starting…", info=None, t0=time.time(), cat=cat, vid=name.stem,
                    video=str(video), n=0)
         _jobs()["index"] = job
@@ -193,6 +211,7 @@ if stage == STAGES[0]:
         threading.Thread(target=work, daemon=True).start()
     if job and not (job["done"] and ss.get("seen_job") == id(job)):
         show_index_job(job)
+    footer()
     st.stop()
 
 d = config.video_dir(vid, category)
@@ -269,12 +288,17 @@ Measured from how each one moves, corrected for camera shake. Instant.</p>
                 grid_ph.markdown(ui.grid([ui.tile(s, k, {"yes": "Yes", "no": "No", "unc": "?"}[k])
                                           for k, s in recent if s]), unsafe_allow_html=True)
 
-            scores = track_scores(d, dets["track"], attr, on_progress, on_result, subject=category, multi=multi)
+            only = None
+            if config.SHORTLIST and not multi:  # hosted CPU demo: verify only the SigLIP2 shortlist (search-then-verify)
+                from crowdlens import search
+                only = set(search.shortlist(search.similarity(d, attr, category), config.SHORTLIST))
+            scores = track_scores(d, dets["track"], attr, on_progress, on_result, subject=category, multi=multi, only=only)
             live_ph.empty(); count_ph.empty(); grid_ph.empty()
             mode = "multi" if multi else "attr"
         ss["result"] = dict(label=route["label"], mode=mode, scores=scores, out=None, thr=threshold,
                             p=detection_probs(dets["track"], scores))
         go_to(STAGES[2])
+    footer()
     st.stop()
 
 # ---------------------------------------------------------------- 3) explore
@@ -334,3 +358,4 @@ if not (res["out"] and Path(res["out"]).exists()):
                                                  unsafe_allow_html=True))
     res["out"] = str(out)
     vid_ph.video(res["out"])
+footer()

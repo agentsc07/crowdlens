@@ -27,7 +27,7 @@ def test_detection_probs_maps_tracks_and_missing():
 
 
 def test_frame_counts_hold_between_strides():
-    yes, tot = frame_counts(np.array([0, 0, 2]), np.array([.9, .1, .8]), 4, 2)
+    yes, tot = frame_counts(np.array([0, 0, 2]), np.array([.95, .1, .92]), 4, 2)
     assert yes.tolist() == [1, 1, 1, 1] and tot.tolist() == [2, 2, 1, 1]
 
 
@@ -37,7 +37,7 @@ def test_frame_counts_no_people():
 
 
 def test_people_summary():
-    assert people_summary({1: .9, 2: .1, 3: float("nan"), 4: .6}) == (2, 1, 1)
+    assert people_summary({1: .9, 2: .1, 3: float("nan"), 4: .6}, 0.5) == (2, 1, 1)
     assert people_summary({}) == (0, 0, 0)
 
 
