@@ -1,7 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "crowdlens"
-version = "0.2.0"
+version = "0.3.0"
+description = "Ask plain-English attribute questions of crowd video: counts plus visual evidence, fully local, attributes only."
+readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Sai Charan"}]
+keywords = ["video", "crowd", "vision-language-model", "person-attributes", "privacy"]
+classifiers = ["Programming Language :: Python :: 3", "Topic :: Scientific/Engineering :: Image Recognition"]
 dependencies = ["numpy", "opencv-python-headless", "pillow", "streamlit", "torch", "transformers", "rfdetr", "supervision==0.30.9"]
 
 [project.scripts]

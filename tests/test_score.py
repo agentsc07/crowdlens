@@ -98,3 +98,13 @@ def test_track_scores_shortlist_only_verifies_shortlist(tmp_path, monkeypatch):
     assert s == {1: 0.0, 2: 0.9, 3: 0.0} and len(calls[0]) == 1
     full = score.track_scores(tmp_path, [1, 2, 3], "wearing a hat")  # separate cache entry from the shortlist run
     assert full == {1: 0.9, 2: 0.9, 3: 0.9}
+
+
+def test_shortlist_run_reuses_full_cached_answer(tmp_path, monkeypatch):
+    import cv2
+    (tmp_path / "crops").mkdir()
+    cv2.imwrite(str(tmp_path / "crops/1.jpg"), np.zeros((200, 80, 3), np.uint8))
+    (tmp_path / "answers.json").write_text('{"wearing a hat": {"1": 0.8}}')
+    from crowdlens import vlm
+    monkeypatch.setattr(vlm, "p_yes", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not run")))
+    assert score.track_scores(tmp_path, [1], "wearing a hat", only={1}) == {1: 0.8}

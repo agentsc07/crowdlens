@@ -35,6 +35,9 @@ CHIPS = {
     "person": ["wearing a hat", "wearing glasses", "wearing red", "carrying a bag", "walking toward the camera",
                "standing still"],
 }
+if config.LITE:  # the hosted samples already have these answered
+    CHIPS["person"] = ["wearing a red top", "wearing a white shirt", "wearing a black jacket", "carrying a backpack",
+                       "wearing shorts", "wearing a hat or cap", "walking to the right", "standing still"]
 DEFAULT_CHIPS = ["red", "white", "moving", "standing still"]
 PLURAL = {"person": "people", "bus": "buses", "bicycle": "bicycles"}
 

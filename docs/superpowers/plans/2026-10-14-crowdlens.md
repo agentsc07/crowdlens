@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11, FastAPI-free (Streamlit calls modules directly; open question resolved as Streamlit for speed), PyTorch, `rfdetr`, `supervision` (ByteTrack), `transformers` (SigLIP 2, Qwen-VL), `faiss-cpu`, OpenCV, pytest.
 
-**Spec:** `/Users/saicharan/Desktop/02_Coursework/DSAI/Projects/CrowdQ/spec.md`
+**Spec:** `spec.md`
 
 ## Global Constraints
 

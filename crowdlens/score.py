@@ -60,7 +60,7 @@ def track_scores(out_dir, tracks, attribute, progress=None, on_result=None, subj
     cache_f = out_dir / "answers.json"
     cache = json.loads(cache_f.read_text()) if cache_f.exists() else {}
     key = _cache_key(attribute, subject, multi)
-    if only is not None:
+    if only is not None and key not in cache:  # a full verification already on file beats a shortlist run
         key += f"|shortlist{len(only)}"
     if key in cache:
         return {int(k): (np.nan if v is None else v) for k, v in cache[key].items()}

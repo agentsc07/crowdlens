@@ -1,0 +1,12 @@
+.git
+.venv
+_holding
+eval
+docs
+tests
+dist
+build
+*.egg-info
+__pycache__
+.DS_Store
+SUBMISSION_*.md
