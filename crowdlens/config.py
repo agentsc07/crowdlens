@@ -5,7 +5,10 @@ import importlib.util
 
 # CROWDLENS_DEMO=1 (or no torch installed) is the free hosted demo: pre-indexed samples only, cached verified answers,
 # and a quick text-to-crop search for any other question. No model weights are loaded except the numpy text encoder.
-DEMO = os.environ.get("CROWDLENS_DEMO") == "1" or importlib.util.find_spec("torch") is None
+# Streamlit Community Cloud mounts repos under /mount/src and may install the full dependency list, so torch can be
+# importable there even though the host cannot run the models: treat it as the demo host too.
+DEMO = (os.environ.get("CROWDLENS_DEMO") == "1" or importlib.util.find_spec("torch") is None
+        or Path(__file__).resolve().parts[:3] == ("/", "mount", "src"))
 # kept out of iCloud-synced folders (Desktop/Documents): proxies and crops churn thousands of files
 DATA_DIR = Path(os.environ.get("CROWDLENS_DATA", Path(__file__).resolve().parent.parent / "space_data" if DEMO
                                else Path.home() / ".crowdlens" / "data"))
