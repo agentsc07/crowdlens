@@ -3,3 +3,14 @@ data/
 .superpowers/
 __pycache__/
 .pytest_cache/
+.DS_Store
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+secrets*
+*.egg-info/
+dist/
+build/
